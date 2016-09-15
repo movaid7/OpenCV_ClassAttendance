@@ -1,18 +1,25 @@
 #include "opencv2/objdetect/objdetect.hpp"
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
+#include "opencv2/contrib/contrib.hpp"
 
+#include <vector>
 #include <iostream>
 #include <stdio.h>
+#include <string>
 
 using namespace std;
 using namespace cv;
 
 // Function Headers
-void detectAndDisplay(Mat img);
+void detectAndDisplay(Mat &img);
 void detectLargestObject(const Mat &img, CascadeClassifier &cascade, Rect &largestObject, int scaledWidth);
 void detectManyObjects(const Mat &img, CascadeClassifier &cascade, vector<Rect> &objects, int scaledWidth);
-void faceProcessing(Point, Point, const Mat &img);
+void faceProcessing(Point, Point, Mat &img);
+double getSimilarity(const Mat A, const Mat B);
+template <typename T> string toString(T t);
+Mat getImageFrom1DFloatMat(const Mat matrixRow, int height);
+
 
 // Global variables	
 const double EYE_SX = 0.10;
@@ -20,24 +27,40 @@ const double EYE_SY = 0.19;
 const double EYE_SW = 0.40;
 const double EYE_SH = 0.36;
 const int DETECTION_WIDTH = 800;
+const double UNKNOWN_PERSON_THRESHOLD = 0.5;
+const int DESIRED_FACE_WIDTH = 70;
+const int DESIRED_FACE_HEIGHT = 80;
+const int DESIRED_LEFT_EYE_Y = 0.16;
+double imageDiff;
+int m_selectedPerson = 0;
 bool eyeDetection = false;				//Will be used to skip histogram equalisation and resizing for eye detection
+bool faceProcessed = false;
 
-// Copy this file from opencv/data/haarscascades to target folder
+vector<Rect> faceRect;					//Value of boxes around detected faces
+vector<Mat> preprocessedFaces;			//Vector to store preprocessed faces
+vector<int> faceLabels;					//Vector to store facelabels of preprocessed faces
+
+//Location of detectors
 string face_cascade_name = "c:/opencv-build/install/share/OpenCV/haarcascades/haarcascade_frontalface_alt.xml";
-string eye1_cascade_name = "c:/opencv-build/install/share/OpenCV/haarcascades/haarcascade_eye_tree_eyeglasses.xml";
-string eye2_cascade_name = "c:/opencv-build/install/share/OpenCV/haarcascades/haarcascade_eye.xml";
+string eye1_cascade_name = "c:/opencv-build/install/share/OpenCV/haarcascades/haarcascade_eye.xml";
+string eye2_cascade_name = "c:/opencv-build/install/share/OpenCV/haarcascades/haarcascade_eye_tree_eyeglasses.xml";
 
 CascadeClassifier faceDetector;
 CascadeClassifier eyeDetector1;
 CascadeClassifier eyeDetector2;
 
-//int filenumber; // Number of file to be saved
+//Unused atm - will be used to store pictures
+//int filenumber;
 //string filename;
 
-// Function main
+
+//**************************************************************************************************
+//										START OF MAIN
+//**************************************************************************************************
+
 int main(void)
 {
-	//Load detectors
+	//-----------------Load detectors-----------------
 	try{
 		faceDetector.load(face_cascade_name);
 		eyeDetector1.load(eye1_cascade_name);
@@ -56,42 +79,212 @@ int main(void)
 		exit(1);
 	}
 	
-	//Load image and call detect function
-	IplImage* pic = cvLoadImage("Pictures/United4.jpg");
-	Mat img(pic);
-	if (!img.empty()){
-		detectAndDisplay(img);
+	VideoCapture cam(0); //webcam
+	Mat img;
+	Mat old_prepreprocessedFace;
+	Mat new_preprocessedFace;
+
+	//-----------------Collecting faces-----------------
+
+	// Will be used to check how long since the previous face was added.
+	double old_time = (double)getTickCount();
+
+	Mat getface;
+
+	//IplImage* pic = cvLoadImage("Pictures/test2.jpg");				//for static images
+	//Mat img(pic);
+
+	for (;;)//will break when 10 faces are found
+	{
+		cam >> img;
+		Mat displayedFrame;
+		
+		if (!img.empty()) {
+			getface = img;
+			img.copyTo(displayedFrame);
+			faceProcessed = false;
+			detectAndDisplay(getface);	//getface will return with the preprocessed face - passed by ref
+		}
+		else {
+			printf("(!)-- No captured frame --(!)\n\n");
+		}
+
+		//get difference in time - since last pic
+		double current_time = (double)getTickCount();
+		double timeDiff_seconds = (current_time - old_time) / getTickFrequency();
+
+		if (faceProcessed)		//if a face was processed, will be stored in new_preprocessedFace
+		{
+			new_preprocessedFace = getface;
+			////TEST
+			//imshow("averageFace", new_preprocessedFace);
+			//waitKey(0);
+			//destroyAllWindows();
+
+			if (old_prepreprocessedFace.data)		//if there exists an old face
+			{
+				imageDiff = getSimilarity(new_preprocessedFace, old_prepreprocessedFace);
+				printf("Difference = %lf\n\n", imageDiff); //test
+			}
+			else //if not, old face = current face
+				old_prepreprocessedFace = new_preprocessedFace;
+			
+			if ((imageDiff > 0.3) && (timeDiff_seconds > 1.0)) {						//if image differs by 0.3 and 1 second has passed
+				// Also add the mirror image to the training set.
+				Mat mirroredFace;														
+				flip(new_preprocessedFace, mirroredFace, 1);							
+				// Add the face & mirrored face to the detected face lists.
+				preprocessedFaces.push_back(new_preprocessedFace);			
+				preprocessedFaces.push_back(mirroredFace);
+				faceLabels.push_back(m_selectedPerson);
+				faceLabels.push_back(m_selectedPerson);
+
+				// Keep a copy of the processed face,
+				// to compare on next iteration.
+				old_prepreprocessedFace = new_preprocessedFace;
+				old_time = current_time;
+
+				// Get access to the face region-of-interest.
+				Mat displayedFaceRegion = displayedFrame(faceRect.at(0));				//at(0) because only one face atm
+				// Add some brightness to each pixel of the face region.				//unneccesary - just to show user face detected
+				displayedFaceRegion += CV_RGB(90, 90, 90);
+
+				//TEST
+				imshow("IMAGE", displayedFaceRegion);
+				waitKey(0);
+				destroyWindow("IMAGE");
+			}
+		}
+		if (faceLabels.size() > 12)														//once 6 faces have been processed, break for - aka stop collecting
+			break; 
+			
 	}
-	else{
-		printf("(!)-- No captured frame --(!)\n\n"); 
-	}
+
+		//------------------------Train model------------------------
+
+		// Load the "contrib" module is dynamically at runtime.
+		bool haveContribModule = initModule_contrib();
+		if (!haveContribModule) {
+			cerr << "ERROR: The 'contrib' module is needed for ";
+			cerr << "FaceRecognizer but hasn't been loaded to OpenCV!";
+			cerr << endl;
+			exit(1);
+		}
+
+		string facerecAlgorithm = "FaceRecognizer.Eigenfaces";
+		Ptr<FaceRecognizer> model;
+		// Use OpenCV's new FaceRecognizer in the "contrib" module:
+		model = Algorithm::create<FaceRecognizer>(facerecAlgorithm);
+		if (model.empty()) {
+			cerr << "ERROR: The FaceRecognizer [" << facerecAlgorithm;
+			cerr << "] is not available in your version of OpenCV. ";
+			cerr << "Please update to OpenCV v2.4.1 or newer." << endl;
+			exit(1);
+		}
+		
+		
+		model->train(preprocessedFaces, faceLabels);
+		printf("trained\n\n");
 	
+
+		
+		Mat averageFace = model->get<Mat>("mean");										//Calculate average face
+		// Convert a 1D float row matrix to a regular 8-bit image.
+		averageFace = getImageFrom1DFloatMat(averageFace, DESIRED_FACE_HEIGHT);
+
+		////TEST
+		//resize(averageFace, averageFace, Size(256, 256), 0, 0, INTER_LINEAR);
+		//imshow("averageFace", averageFace);
+		//waitKey(0);
+		//destroyAllWindows();
+		
+		// Get the eigenvectors
+		Mat eigenvectors = model->get<Mat>("eigenvectors");
+		
+		// Show the best 20 (or less) eigenfaces
+		for (int i = 0; i < min(20, eigenvectors.cols); i++) {
+			// Create a continuous column vector from eigenvector #i.
+			Mat eigenvector = eigenvectors.col(i).clone();
+			Mat eigenface = getImageFrom1DFloatMat(eigenvector,DESIRED_FACE_HEIGHT);
+
+			////TEST
+			/*imshow(format("Eigenface%d", i), eigenface);
+			waitKey(0);
+			destroyAllWindows();*/
+		}
+
+		//------------------------Recognition------------------------
+
+		int identity = model->predict(new_preprocessedFace);							//NEED TO ADD MODES AND PERFORM RECOGNITION WITH NEW IMAGES FROM CAMERA
+		 
+		// Get some required data from the FaceRecognizer model.
+		eigenvectors = model->get<Mat>("eigenvectors");
+		Mat averageFaceRow = model->get<Mat>("mean");
+		// Project the input image onto the eigenspace.
+		Mat projection = subspaceProject(eigenvectors, averageFaceRow,
+			new_preprocessedFace.reshape(1, 1));
+		// Generate the reconstructed face back from the eigenspace.
+		Mat reconstructionRow = subspaceReconstruct(eigenvectors,averageFaceRow, projection);
+		// Make it a rectangular shaped image instead of a single row.
+		Mat reconstructionMat = reconstructionRow.reshape(1,DESIRED_FACE_HEIGHT);
+		// Convert the floating-point pixels to regular 8-bit uchar.
+		Mat reconstructedFace = Mat(reconstructionMat.size(), CV_8U);
+		reconstructionMat.convertTo(reconstructedFace, CV_8U, 1, 0);
+
+	/*	//TEST
+		imshow("averageFace", reconstructedFace); 
+		waitKey(0);
+		destroyAllWindows();
+		imshow("averageFace", new_preprocessedFace);
+		waitKey(0);
+		destroyAllWindows();
+*/
+
+		double similarity = getSimilarity(new_preprocessedFace, reconstructedFace);
+		string outputStr;
+
+		//if similarity is greater than threshold, person is not recognised
+		if (similarity > UNKNOWN_PERSON_THRESHOLD) {
+			outputStr = "Unknown";
+		}
+		else
+		{
+				int identity = model->predict(new_preprocessedFace);
+				outputStr = toString(identity);		
+		}
+		cout << "Identity: " << outputStr << ". Similarity: " << similarity << endl;		//current identity value will be 0 since only 1 face trained and detected
+
 	system("pause");
 	return 0;
 }
 
 
-void detectAndDisplay(Mat img)
+
+//**************************************************************************************************
+//										FUNCTIONS BELOW
+//**************************************************************************************************
+
+void detectAndDisplay(Mat &input) 
 {
+	Mat img = input;
 	//Vector to hold face boxes
-	vector<Rect> faces;
-	detectManyObjects(img, faceDetector, faces, DETECTION_WIDTH);;
+	detectManyObjects(img, faceDetector, faceRect, DETECTION_WIDTH);;
 
 	//How many faces did multiscale detect? - [test parameter]
-	printf("%d faces were detected\n\n", faces.size());
+	printf("%d faces were detected\n\n", faceRect.size());
 	
 	//ADD RECTANGLES TO ORIGINAL IMAGE
-	for (int i = 0; i < (int)faces.size(); i++)
+	for (int i = 0; i < (int)faceRect.size(); i++)
 	{
-		Point pt1(faces[i].x, faces[i].y);
-		Point pt2((faces[i].x + faces[i].height), (faces[i].y + faces[i].width));
+		Point pt1(faceRect[i].x, faceRect[i].y);
+		Point pt2((faceRect[i].x + faceRect[i].height), (faceRect[i].y + faceRect[i].width));
 		rectangle(img, pt1, pt2, Scalar(0, 255, 0), 2, 8, 0);
 	}
 
 	//OUTPUT ORIGINAL PICTURE WITH RECTANGLES AROUND EACH FACE
-	imshow("Detected", img);
-	waitKey(0);
-	destroyWindow("Detected");
+	//imshow("Detected", img);
+	//waitKey(0);
+	//destroyWindow("Detected");
 	
 	//------------------------------------------------------------------------------
 	//----------------------------START OF EYE DETECTION----------------------------
@@ -102,9 +295,9 @@ void detectAndDisplay(Mat img)
 	Mat topRightOfFace;
 	
 	//EXTRACT AND SAVE FACES
-	for (int i = 0; i < (int)faces.size(); i++)
+	for (int i = 0; i < (int)faceRect.size(); i++)
 	{
-		face = img(faces[i]);
+		face = img(faceRect[i]);
 		resize(face, face, Size(512, 512), 0, 0, INTER_LINEAR); // This will be needed later while saving images
 		int leftX = cvRound(face.cols * EYE_SX);
 		int topY = cvRound(face.rows * EYE_SY);
@@ -118,7 +311,7 @@ void detectAndDisplay(Mat img)
 		//resize(topLeftOfFace, topLeftOfFace, Size(128, 128), 0, 0, INTER_LINEAR); // This will be needed later while saving images
 		//resize(topRightOfFace, topRightOfFace, Size(128, 128), 0, 0, INTER_LINEAR); // This will be needed later while saving images
 
-		//TEST DISPLAY
+		//TEST
 	/*	imshow("TEST", topLeftOfFace);
 		waitKey(0);
 		imshow("TEST", topRightOfFace);
@@ -201,22 +394,25 @@ void detectAndDisplay(Mat img)
 			faceProcessing(leftEye,rightEye, gray);
 		}
 		else{
-			imshow("Eyes not found",face);
-			waitKey(0);
-			destroyWindow("Eyes not found");
+			//TEST - shows entire face of person whose eyes were not located
+			//imshow("Eyes not found",face);
+			//waitKey(0);
+			//destroyWindow("Eyes not found");
 		}
-			
-		eyeDetection = false;
 
-		 //////Show each face/region
+		eyeDetection = false;
+		input = gray;
+
+		 //TEST
 		 //printf("%d", leftEyeRect.size());
 		 //imshow("Detected", topLeftOfFace);
 		 //waitKey(0);
 		 //destroyWindow("Detected");
 	}
 
-
 }
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 void detectObjectsCustom(const Mat &img, CascadeClassifier &cascade, vector<Rect> &objects, int scaledWidth, int flags, Size minFeatureSize, float searchScaleFactor, int minNeighbors)
 {
@@ -262,9 +458,9 @@ void detectObjectsCustom(const Mat &img, CascadeClassifier &cascade, vector<Rect
 		Point pt2((objects[i].x + objects[i].height), (objects[i].y + objects[i].width));
 		rectangle(equalizedImg, pt1, pt2, Scalar(0, 255, 0), 2, 8, 0);
 	}
-	imshow("TEST", equalizedImg);
-	waitKey(0);
-	destroyWindow("TEST");
+	//imshow("TEST", equalizedImg);
+	//waitKey(0);
+	//destroyWindow("TEST");
 
 
 	// Enlarge the results if the image was temporarily shrunk before detection.
@@ -292,6 +488,8 @@ void detectObjectsCustom(const Mat &img, CascadeClassifier &cascade, vector<Rect
 	// Return with the detected face rectangles stored in "objects".
 }
 
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 void detectLargestObject(const Mat &img, CascadeClassifier &cascade, Rect &largestObject, int scaledWidth)
 {
 	// Only search for just 1 object (the biggest in the image).
@@ -318,6 +516,8 @@ void detectLargestObject(const Mat &img, CascadeClassifier &cascade, Rect &large
 	}
 }
 
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 void detectManyObjects(const Mat &img, CascadeClassifier &cascade, vector<Rect> &objects, int scaledWidth)
 {
 	// Search for many objects in the one image.
@@ -335,12 +535,49 @@ void detectManyObjects(const Mat &img, CascadeClassifier &cascade, vector<Rect> 
 	detectObjectsCustom(img, cascade, objects, scaledWidth, flags, minFeatureSize, searchScaleFactor, minNeighbors);
 }
 
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+double getSimilarity(const Mat A, const Mat B) {
+	// Calculate the L2 relative error between the 2 images.
+	double errorL2 = norm(A, B, CV_L2);
+	// Scale the value since L2 is summed across all pixels.
+	double similarity = errorL2 / (double)(A.rows * A.cols);
+	return similarity;
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// Convert the matrix row or column (float matrix) to a
+// rectangular 8-bit image that can be displayed or saved.
+// Scales the values to be between 0 to 255.
+Mat getImageFrom1DFloatMat(const Mat matrixRow, int height)
+{
+	// Make a rectangular shaped image instead of a single row.
+	Mat rectangularMat = matrixRow.reshape(1, height);
+	// Scale the values to be between 0 to 255 and store them
+	// as a regular 8-bit uchar image.
+	Mat dst;
+	normalize(rectangularMat, dst, 0, 255, NORM_MINMAX,
+		CV_8UC1);
+	return dst;
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename T> string toString(T t)
+{
+	ostringstream out;
+	out << t;
+	return out.str();
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 //------------------------------------------------------------------------------------
 //-----------------------------------PRE-PROCESSING-----------------------------------
 //------------------------------------------------------------------------------------
 
-void faceProcessing(Point leftEye, Point rightEye, const Mat &gray)
+void faceProcessing(Point leftEye, Point rightEye, Mat &gray)
 {
 	//---------------------------------------STAGE 1---------------------------------------
 
@@ -361,10 +598,6 @@ void faceProcessing(Point leftEye, Point rightEye, const Mat &gray)
 	// Get the amount we need to scale the image to be the desired
 	// fixed size we want.
 
-	const int DESIRED_FACE_WIDTH = 70;
-	const int DESIRED_FACE_HEIGHT = 80;
-	const int DESIRED_LEFT_EYE_Y = 0.16;
-
 	double desiredLen = (DESIRED_RIGHT_EYE_X - 0.16);
 	double scale = desiredLen * DESIRED_FACE_WIDTH / len;
 
@@ -372,7 +605,7 @@ void faceProcessing(Point leftEye, Point rightEye, const Mat &gray)
 	Mat rot_mat = getRotationMatrix2D(eyesCenter, angle, scale);
 	// Shift the center of the eyes to be the desired center.
 	double ex = DESIRED_FACE_WIDTH * 0.5f - eyesCenter.x;
-	double ey = DESIRED_FACE_HEIGHT * DESIRED_LEFT_EYE_Y - eyesCenter.y +15;
+	double ey = DESIRED_FACE_HEIGHT * DESIRED_LEFT_EYE_Y - eyesCenter.y + 15;
 	rot_mat.at<double>(0, 2) += ex;
 	rot_mat.at<double>(1, 2) += ey;
 	// Transform the face image to the desired angle & size &
@@ -382,7 +615,7 @@ void faceProcessing(Point leftEye, Point rightEye, const Mat &gray)
 	warpAffine(gray, warped, rot_mat, warped.size());
 
 	//---------------------------------------STAGE 2---------------------------------------
-	
+
 	Mat faceImg = warped;
 	int w = faceImg.cols;
 	int h = faceImg.rows;
@@ -427,16 +660,32 @@ void faceProcessing(Point leftEye, Point rightEye, const Mat &gray)
 		}// end x loop
 	}//end y loop
 
-	//---------------------------------------STAGE 3---------------------------------------
+	 //---------------------------------------STAGE 3---------------------------------------
 
 	Mat filtered = Mat(warped.size(), CV_8U);
 	bilateralFilter(warped, filtered, 0, 20.0, 2.0);
 
 	//---------------------------------------STAGE 4---------------------------------------
 
+	// Draw a black-filled ellipse in the middle of the image.
+	// First we initialize the mask image to white (255).
+	Mat mask = Mat(warped.size(), CV_8UC1, Scalar(255));
+	double dw = DESIRED_FACE_WIDTH;
+	double dh = DESIRED_FACE_HEIGHT;
+	Point faceCenter = Point(cvRound(dw * 0.5),
+		cvRound(dh * 0.4));
+	Size size = Size(cvRound(dw * 0.5), cvRound(dh * 0.8));
+	ellipse(mask, faceCenter, size, 0, 0, 360, Scalar(0), CV_FILLED);
+
+	// Apply the elliptical mask on the face, to remove corners.
+	// Sets corners to gray, without touching the inner face.
+	filtered.setTo(Scalar(128), mask);
+
+	faceProcessed = true;
+	gray = filtered;
 
 	//TEST
-	imshow("TEST", filtered);
-	waitKey(0);
-	destroyWindow("TEST");
+	//imshow("TEST", filtered);
+	//waitKey(0);
+	//destroyWindow("TEST");
 }
