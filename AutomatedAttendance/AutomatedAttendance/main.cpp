@@ -21,6 +21,7 @@ void trainFace(int m_selectedPerson);
 void recogniseFace(Mat &input);
 double getSimilarity(const Mat A, const Mat B);
 
+void quickDetect(Mat &src);
 Mat getImageFrom1DFloatMat(const Mat matrixRow, int height);
 Mat reconstructFace(const Ptr<FaceRecognizer> model, const Mat preprocessedFace);
 
@@ -34,12 +35,15 @@ const int DETECTION_WIDTH = 800;
 const int DESIRED_FACE_WIDTH = 70;
 const int DESIRED_FACE_HEIGHT = 80;
 const int DESIRED_LEFT_EYE_Y = 0.16;
-int mode = 0;
+char mode = '0';
 double imageDiff;
 bool m_debug = true;
 bool eyeDetection = false;				//Will be used to skip histogram equalisation and resizing for eye detection
 bool faceProcessed = false;
 bool facefound = false;
+double min_face_size = 20;
+double max_face_size = 300;
+bool run;
 
 VideoCapture cam(0); //webcam
 Ptr<FaceRecognizer> model;
@@ -81,79 +85,115 @@ int main(void)
 		exit(1);
 	}
 
-	Mat img;	
+	run = true;
+	Mat img;
 	int ID;
 
 	if (cam.isOpened())
 	{
-		while (true)
+		while (run == true)
 		{
 			switch (mode) //Menu
 			{
-				case 0:
-				{
-					
-					printf("MAIN MENU\n");
-					printf("Option 1 - Detect Faces\n");						//Just box faces and display
-					printf("Option 2 - Train Faces\n");							//Ask user for ID and train
-					printf("Option 3 - Recognise Faces\n");						//Attempt facial recognition
-				
-					printf("\nType out an option number and hit ENTER\n");
-					cin >> mode;
-					break;
-				}
-				
-				case 1:
+			case '0':
+			{
+				destroyAllWindows();
+				system("cls");
+				printf("MAIN MENU\n");
+				printf("Option 1 - Detect Faces\n");						//Just box faces and display
+				printf("Option 2 - Train Faces\n");							//Ask user for ID and train
+				printf("Option 3 - Recognise Faces\n");						//Attempt facial recognition
+
+				printf("\nType out an option number and hit ENTER\n(S to exit)\n");
+				printf("\nYour Choice: ");
+				cin >> mode;
+				break;
+			}
+
+			case '1':
+			{
+				system("cls");
+				while (1)
 				{
 					cam >> img;
-					if (!img.empty())
-					{
-						Mat input = img;
-						detectFaces(input);
-						imshow("Webcam", input);
-					}
+					quickDetect(img);
+					imshow("Automated Attendance", img);
+					// press 's' to escape
+					if (waitKey(1) == 's') { mode = '0'; destroyAllWindows();  break; };
+				}
+				break;
+			}
+
+			case '2':
+			{
+				system("cls");
+				printf("Enter person's ID or -1 to stop training\n");
+				cin >> ID;
+				if (ID == -1)
+					mode = '0';
+				else
+				{
+					//Mat input = img;
+					trainFace(ID);
+					//imshow("Processed", input);
 					int c = waitKey(10);
-					if ((char)c == 's') { mode = 0; destroyAllWindows(); }
-					break;
+					if ((char)c == 's') { mode = '0'; destroyAllWindows(); }
 				}
 
-				case 2:
-				{
-						printf("Enter person's ID or -1 to stop\n");
-						cin >> ID;
-						if (ID == -1)
-							mode = 0;
-						else
-						{
-							//Mat input = img;
-							trainFace(ID);
-							//imshow("Processed", input);
-							int c = waitKey(10);
-							if ((char)c == 's') { mode = 0; destroyAllWindows(); }
-						}
-					
-					break;
-				}
+				break;
+			}
 
-				case 3:
+			case '3':
+			{
+				int c = waitKey(10);
+				cam >> img;
+				if (!img.empty() && preprocessedFaces.size()>0 && preprocessedFaces.size() == faceLabels.size())
 				{
-					cam >> img;
-					if (!img.empty())
-					{
-						Mat input = img;
-						recogniseFace(input);
-						imshow("Webcam", input);
-					}
-					int c = waitKey(10);
-					if ((char)c == 's') { mode = 0; destroyAllWindows(); }
-					break;
+					Mat input = img;
+					recogniseFace(input);
+					//imshow("Webcam", input);
 				}
-				default:
+				else
 				{
-					printf("Invalid Entry! Please Retry/n");
+					system("cls");
+					mode = '0';
+					destroyAllWindows();
+					if (preprocessedFaces.size() <= 0)
+					{
+						printf("There is no trained data to test against\n\n");
+					}
+
+					if (preprocessedFaces.size() != faceLabels.size())
+					{
+						printf("Data is corrupted\n\n");
+					}
+					system("pause");
 					break;
 				}
 				
+				if ((char)c == 's') { mode = '0'; destroyAllWindows(); }
+				break;
+			}
+			case 's':
+			{
+				run = false;
+				break;
+			}
+			case 'S':
+			{
+				run = false;
+				break;
+			}
+			default:
+			{
+				system("cls");
+				destroyAllWindows();
+				mode = '0';
+				printf("Invalid Entry! Please Retry\n");
+				system("pause");
+				break;
+			}
+
 			}
 		}
 	}
@@ -161,10 +201,30 @@ int main(void)
 }
 
 
-
 //**************************************************************************************************
 //										FUNCTIONS BELOW
 //**************************************************************************************************
+
+void quickDetect(Mat &image)
+{
+	faceDetector.detectMultiScale(image, faceRect, 1.2, 2, 0 | CV_HAAR_SCALE_IMAGE, Size(min_face_size, min_face_size), Size(max_face_size, max_face_size));
+	printf("%d faces were detected\n\n", faceRect.size());
+
+	// Draw on the detected faces
+	for (int i = 0; i < (int)faceRect.size(); i++)
+	{
+		Point pt1(faceRect[i].x, faceRect[i].y);
+		Point pt2((faceRect[i].x + faceRect[i].height), (faceRect[i].y + faceRect[i].width));
+		rectangle(image, pt1, pt2, Scalar(0, 255, 0), 2, 8, 0);
+	}
+
+	if ((int)faceRect.size()>0)
+		facefound = true;
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 
 void detectFaces(Mat &input)
 {
@@ -195,11 +255,11 @@ void detectEyes(Mat &input)
 	Mat img = input;
 	Mat topLeftOfFace;
 	Mat topRightOfFace;
-	Mat gray,face;
-
-	for (int i = 0; i < (int)faceRect.size(); i++)
+	Mat gray, face;
+	face = img;
+	/*for (int i = 0; i < (int)faceRect.size(); i++)
 	{
-		face = img(faceRect[i]);
+		face = img(faceRect[i]);*/
 		resize(face, face, Size(512, 512), 0, 0, INTER_LINEAR); // This will be needed later while saving images
 		int leftX = cvRound(face.cols * EYE_SX);
 		int topY = cvRound(face.rows * EYE_SY);
@@ -277,8 +337,7 @@ void detectEyes(Mat &input)
 		else {
 			faceProcessed = false;
 		}
-	}
-
+	//}
 	eyeDetection = false;
 	input = gray;
 }
@@ -299,27 +358,34 @@ void trainFace(int m_selectedPerson)
 	for (;;)//will break when 10 faces are found
 	{
 		cam >> img;
-		
+
 		if (!img.empty()) {
 			input = img;
 			img.copyTo(displayedFrame);
-			
+
 			facefound = false;
 			faceProcessed = false;
-			
+
 			detectFaces(input);				//Find box around face
 
-			if (facefound) 
-				detectEyes(input);			//getface will return with the preprocessed face - passed by ref
-			
-			//test
-			/*imshow("", input);
-			waitKey(0);
-			destroyAllWindows();*/
+			if (facefound)
+			{
+				for (int i = 0; i < (int)faceRect.size(); i++)
+				{
+					input = input(faceRect[i]);
+					detectEyes(input);
+				}
+			}
 		}
 		else {
 			printf("(!)-- No captured frame --(!)\n\n");
 		}
+
+
+		//test
+		/*imshow("", input);
+		waitKey(0);
+		destroyAllWindows();*/
 
 		//get difference in time - since last pic
 		double current_time = (double)getTickCount();
@@ -411,13 +477,12 @@ void trainFace(int m_selectedPerson)
 		// Create a continuous column vector from eigenvector #i.
 		Mat eigenvector = eigenvectors.col(i).clone();
 		Mat eigenface = getImageFrom1DFloatMat(eigenvector, DESIRED_FACE_HEIGHT);
-		
+
 		//test
 		/*imshow(format("Eigenface%d", i), eigenface);
 		waitKey(0);
 		destroyAllWindows();*/
 	}
-	
 }
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -434,61 +499,71 @@ double getSimilarity(const Mat A, const Mat B) {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-void recogniseFace(Mat &input)
+void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this function - improve modularity
 {
-	//TODO: Need to get face FIRST & then call this function - improve modularity
 	int identity = -1;
 	Mat img = input;
 	Mat face;
-	detectFaces(img);
-	detectEyes(img);
-	Mat preprocessedFace = img;
+	quickDetect(img);
 
-	if (faceProcessed && preprocessedFaces.size() > 0 && preprocessedFaces.size() == faceLabels.size())
+	for (int i = 0; i < (int)faceRect.size(); i++)
 	{
-		// Generate a face approximation by back-projecting the eigenvectors & eigenvalues.
-		Mat reconstructedFace;
-		reconstructedFace = reconstructFace(model, preprocessedFace);
-
-		if (m_debug)//test
-			if (reconstructedFace.data)
-				imshow("reconstructedFace", reconstructedFace);
-
-		// Verify whether the reconstructed face looks like the preprocessed face, otherwise it is probably an unknown person.
-		double similarity = getSimilarity(preprocessedFace, reconstructedFace);
-
-		string outputStr;
-		if (similarity < UNKNOWN_PERSON_THRESHOLD) {
-			// Identify who the person is in the preprocessed face image.
-			identity = model->predict(preprocessedFace);
-			outputStr = toString(identity);
+		faceProcessed = false;
+		face = img(faceRect[i]);
+		if (facefound)
+		{
+			detectEyes(face);
 		}
-		else {
-			// Since the confidence is low, assume it is an unknown person.
-			outputStr = "Unknown";
-		}
-		cout << "Identity: " << outputStr << ". Similarity: " << similarity << endl;
+	
+			
+		if (faceProcessed)
+		{
+			Mat preprocessedFace = face;	
+			cout << "here";
+			// Generate a face approximation by back-projecting the eigenvectors & eigenvalues.
+			Mat reconstructedFace;
+			reconstructedFace = reconstructFace(model, preprocessedFace);
 
-		//// Show the confidence rating for the recognition in the mid-top of the display.
-		//int cx = (input.cols - DESIRED_FACE_WIDTH) / 2;
-		//Point ptBottomRight = Point(cx - 5, 8 + DESIRED_FACE_HEIGHT);
-		//Point ptTopLeft = Point(cx - 15, 8);
-		//// Draw a gray line showing the threshold for an "unknown" person.
-		//Point ptThreshold = Point(ptTopLeft.x, ptBottomRight.y - (1.0 - UNKNOWN_PERSON_THRESHOLD) * DESIRED_FACE_HEIGHT);
-		//rectangle(img, ptThreshold, Point(ptBottomRight.x, ptThreshold.y), CV_RGB(200, 200, 200), 1, CV_AA);
-		//// Crop the confidence rating between 0.0 to 1.0, to show in the bar.
-		//double confidenceRatio = 1.0 - min(max(similarity, 0.0), 1.0);
-		//Point ptConfidence = Point(ptTopLeft.x, ptBottomRight.y - confidenceRatio * DESIRED_FACE_HEIGHT);
-		//// Show the light-blue confidence bar.
-		//rectangle(img, ptConfidence, ptBottomRight, CV_RGB(0, 255, 255), CV_FILLED, CV_AA);
-		//// Show the gray border of the bar.
-		//rectangle(img, ptTopLeft, ptBottomRight, CV_RGB(200, 200, 200), 1, CV_AA);
-		
-		//test
-		imshow("", img);
-		waitKey(0);
-		destroyAllWindows();
-	}	
+			if (m_debug)//test
+				if (reconstructedFace.data)
+					imshow("reconstructedFace", reconstructedFace);
+
+			// Verify whether the reconstructed face looks like the preprocessed face, otherwise it is probably an unknown person.
+			double similarity = getSimilarity(preprocessedFace, reconstructedFace);
+
+			string outputStr;
+			if (similarity < UNKNOWN_PERSON_THRESHOLD) {
+				// Identify who the person is in the preprocessed face image.
+				identity = model->predict(preprocessedFace);
+				outputStr = toString(identity);
+			}
+			else {
+				// Since the confidence is low, assume it is an unknown person.
+				outputStr = "Unknown";
+			}
+			cout << "Identity: " << outputStr << ". Similarity: " << similarity << endl;
+
+			//// Show the confidence rating for the recognition in the mid-top of the display.
+			//int cx = (input.cols - DESIRED_FACE_WIDTH) / 2;
+			//Point ptBottomRight = Point(cx - 5, 8 + DESIRED_FACE_HEIGHT);
+			//Point ptTopLeft = Point(cx - 15, 8);
+			//// Draw a gray line showing the threshold for an "unknown" person.
+			//Point ptThreshold = Point(ptTopLeft.x, ptBottomRight.y - (1.0 - UNKNOWN_PERSON_THRESHOLD) * DESIRED_FACE_HEIGHT);
+			//rectangle(img, ptThreshold, Point(ptBottomRight.x, ptThreshold.y), CV_RGB(200, 200, 200), 1, CV_AA);
+			//// Crop the confidence rating between 0.0 to 1.0, to show in the bar.
+			//double confidenceRatio = 1.0 - min(max(similarity, 0.0), 1.0);
+			//Point ptConfidence = Point(ptTopLeft.x, ptBottomRight.y - confidenceRatio * DESIRED_FACE_HEIGHT);
+			//// Show the light-blue confidence bar.
+			//rectangle(img, ptConfidence, ptBottomRight, CV_RGB(0, 255, 255), CV_FILLED, CV_AA);
+			//// Show the gray border of the bar.
+			//rectangle(img, ptTopLeft, ptBottomRight, CV_RGB(200, 200, 200), 1, CV_AA);
+
+			//test
+			//imshow("", img);
+			//waitKey(0);
+			//destroyAllWindows();
+		}
+	}
 }
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
