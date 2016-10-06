@@ -7,6 +7,7 @@
 #include <iostream>
 #include <stdio.h>
 #include <string>
+#include <time.h>  
 
 using namespace std;
 using namespace cv;
@@ -44,6 +45,7 @@ bool facefound = false;
 double min_face_size = 20;
 double max_face_size = 300;
 bool run;
+int random;
 
 VideoCapture cam(0); //webcam
 Ptr<FaceRecognizer> model;
@@ -60,12 +62,31 @@ CascadeClassifier faceDetector;
 CascadeClassifier eyeDetector1;
 CascadeClassifier eyeDetector2;
 
+void CallBackFunc(int event, int x, int y, int flags, void* userdata)
+{
+	if (event != EVENT_LBUTTONDOWN)
+		return;
+
+		if (x<145 && x>67 && y<450 && y>425)
+		{
+			destroyAllWindows();
+			mode = '2';
+		}
+		else if (x<580 && x>420 && y<450 && y>425)
+		{
+			destroyAllWindows();
+			mode = '3';
+		}
+		//cout << "Left button of the mouse is clicked - position (" << x << ", " << y << ")" << endl;
+}
+
 //**************************************************************************************************
 //										START OF MAIN
 //**************************************************************************************************
 
 int main(void)
 {
+	srand(time(NULL)); //for random num gen - recognise will train model with new face when random num = 7
 	//-----------------Load detectors-----------------
 	try {
 		faceDetector.load(face_cascade_name);
@@ -84,7 +105,7 @@ int main(void)
 		cerr << eye1_cascade_name << ")!" << endl;
 		exit(1);
 	}
-
+	
 	run = true;
 	Mat img;
 	int ID;
@@ -113,11 +134,17 @@ int main(void)
 			case '1':
 			{
 				system("cls");
-				while (1)
+				while (mode=='1')
 				{
 					cam >> img;
 					quickDetect(img);
-					imshow("Automated Attendance", img);
+					namedWindow("Automated Attendence", 1);
+					setMouseCallback("Automated Attendence", CallBackFunc, NULL);
+					putText(img, "Train", Point(70, 450), CV_FONT_VECTOR0, 1.0, CV_RGB(255, 255, 255), 3.0);
+					putText(img, "Train", Point(70, 450), CV_FONT_VECTOR0, 1.0, CV_RGB(0, 0, 0), 2.0);
+					putText(img, "Recognise", Point(420, 450), CV_FONT_VECTOR0, 1.0, CV_RGB(255, 255, 255), 3.0);
+					putText(img, "Recognise", Point(420, 450), CV_FONT_VECTOR0, 1.0, CV_RGB(0, 0, 0), 2.0);
+					imshow("Automated Attendence", img);
 					// press 's' to escape
 					if (waitKey(1) == 's') { mode = '0'; destroyAllWindows();  break; };
 				}
@@ -150,8 +177,9 @@ int main(void)
 				if (!img.empty() && preprocessedFaces.size()>0 && preprocessedFaces.size() == faceLabels.size())
 				{
 					Mat input = img;
+					//namedWindow("Webcam", 1);
 					recogniseFace(input);
-					//imshow("Webcam", input);
+					imshow("Webcam", img);
 				}
 				else
 				{
@@ -217,7 +245,7 @@ void quickDetect(Mat &image)
 		Point pt2((faceRect[i].x + faceRect[i].height), (faceRect[i].y + faceRect[i].width));
 		rectangle(image, pt1, pt2, Scalar(0, 255, 0), 2, 8, 0);
 	}
-
+	
 	if ((int)faceRect.size()>0)
 		facefound = true;
 }
@@ -352,13 +380,13 @@ void trainFace(int m_selectedPerson)
 	Mat displayedFrame;
 	Mat old_prepreprocessedFace;
 	Mat new_preprocessedFace;
-
+	int count = 0;
 	double old_time = (double)getTickCount();
 
 	for (;;)//will break when 10 faces are found
 	{
 		cam >> img;
-
+		
 		if (!img.empty()) {
 			input = img;
 			img.copyTo(displayedFrame);
@@ -412,7 +440,7 @@ void trainFace(int m_selectedPerson)
 				preprocessedFaces.push_back(mirroredFace);
 				faceLabels.push_back(m_selectedPerson);
 				faceLabels.push_back(m_selectedPerson);
-
+				count++;
 				// Keep a copy of the processed face,
 				// to compare on next iteration.
 				old_prepreprocessedFace = new_preprocessedFace;
@@ -429,7 +457,7 @@ void trainFace(int m_selectedPerson)
 				//destroyWindow("IMAGE");
 			}
 		}
-		if (faceLabels.size() > 12)														//once 6 faces have been processed, break for - aka stop collecting
+		if (count>=6)														//once 6 faces have been processed, break for - aka stop collecting
 			break;
 	}
 
@@ -519,7 +547,6 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 		if (faceProcessed)
 		{
 			Mat preprocessedFace = face;	
-			cout << "here";
 			// Generate a face approximation by back-projecting the eigenvectors & eigenvalues.
 			Mat reconstructedFace;
 			reconstructedFace = reconstructFace(model, preprocessedFace);
@@ -536,11 +563,22 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 				// Identify who the person is in the preprocessed face image.
 				identity = model->predict(preprocessedFace);
 				outputStr = toString(identity);
+
+				//Will train randomly with new recognised face - Done so to improve run speed
+				random = rand() % 10 + 1;
+				//cout << random; testing
+				if (random == 7)
+				{
+					preprocessedFaces.push_back(preprocessedFace);
+					faceLabels.push_back(identity);
+					model->train(preprocessedFaces, faceLabels);
+				}
 			}
 			else {
 				// Since the confidence is low, assume it is an unknown person.
 				outputStr = "Unknown";
 			}
+			putText(input, outputStr, Point(faceRect[i].x, faceRect[i].y), CV_FONT_VECTOR0, 1.0, CV_RGB(0, 255, 0), 2.0);
 			cout << "Identity: " << outputStr << ". Similarity: " << similarity << endl;
 
 			//// Show the confidence rating for the recognition in the mid-top of the display.
