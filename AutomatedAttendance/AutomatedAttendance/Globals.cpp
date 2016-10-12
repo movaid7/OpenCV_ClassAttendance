@@ -117,3 +117,12 @@ void Globals::detectLargestObject(const Mat &img, CascadeClassifier &cascade, Re
 		largestObject = Rect(-1, -1, -1, -1);
 	}
 }
+
+double Globals::getSimilarity(const Mat A, const Mat B)
+{
+	// Calculate the L2 relative error between the 2 images.
+	double errorL2 = norm(A, B, CV_L2);
+	// Scale the value since L2 is summed across all pixels.
+	double similarity = errorL2 / (double)(A.rows * A.cols);
+	return similarity;
+}

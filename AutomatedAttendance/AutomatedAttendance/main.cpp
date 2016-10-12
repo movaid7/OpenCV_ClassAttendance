@@ -3,6 +3,7 @@
 #include "opencv2/imgproc/imgproc.hpp"
 #include "opencv2/contrib/contrib.hpp"
 
+#include <algorithm>
 #include <vector>
 #include <iostream>
 #include <stdio.h>
@@ -17,11 +18,11 @@ using namespace cv;
 // Function Headers
 template <typename T> string toString(T t);
 void detectFaces(Mat &img);
-void trainFace(int m_selectedPerson);
+void trainFace(string name,bool nameFound);
 void recogniseFace(Mat &input);
-double getSimilarity(const Mat A, const Mat B);
-
 void quickDetect(Mat &src);
+char easytolower(char in);
+
 Mat getImageFrom1DFloatMat(const Mat matrixRow, int height);
 Mat reconstructFace(const Ptr<FaceRecognizer> model, const Mat preprocessedFace);
 
@@ -32,22 +33,21 @@ const double EYE_SW = 0.40;
 const double EYE_SH = 0.36;
 const double UNKNOWN_PERSON_THRESHOLD = 0.5;
 const int DETECTION_WIDTH = 800;
-char mode = '0';
-double imageDiff;
-bool m_debug = true;
-bool eyeDetection = false;				//Will be used to skip histogram equalisation and resizing for eye detection
-bool faceProcessed = false;
-bool facefound = false;
 double min_face_size = 20;
 double max_face_size = 300;
-bool run;
-int random;
+
+char mode = '0';						//Mode that programming is running in
+bool m_debug = true;					//Temp variable for testing. needs to be applied for all testing cases
+bool eyeDetection = false;				//Will be used to skip histogram equalisation and resizing for eye detection
+bool faceProcessed = false;				//Has the face been processed
+bool facefound = false;					//Has a face been found
+int numFaces;							//The number of faces currently stored in yml file
 
 VideoCapture cam(0); //webcam
-Ptr<FaceRecognizer> model;
 vector<Rect> faceRect;					//Value of boxes around detected faces
 vector<Mat> preprocessedFaces;			//Vector to store preprocessed faces
 vector<int> faceLabels;					//Vector to store facelabels of preprocessed faces
+map<int, string> stringLabels;			//matches int labels to strings (Name of each person)
 
 //Location of detectors
 string face_cascade_name = "c:/opencv-build/install/share/OpenCV/haarcascades/haarcascade_frontalface_alt.xml";
@@ -58,6 +58,9 @@ CascadeClassifier faceDetector;
 CascadeClassifier eyeDetector1;
 CascadeClassifier eyeDetector2;
 
+Ptr<FaceRecognizer> model1 = createEigenFaceRecognizer();
+
+//------------------------------------MOUSE CLICKS------------------------------------
 void CallBackFunc(int event, int x, int y, int flags, void* userdata)
 {
 	if (event != EVENT_LBUTTONDOWN)
@@ -82,7 +85,11 @@ void CallBackFunc(int event, int x, int y, int flags, void* userdata)
 
 int main(void)
 {
-	srand(time(NULL)); //for random num gen - recognise will train model with new face when random num = 7
+
+	bool run;				//used to end program
+	bool notEmpty;			//true when the non-empty yml file exists
+	srand(time(NULL));		//for random num gen - recognise will train model with new face when random num = 7
+	
 	//-----------------Load detectors-----------------
 	try {
 		faceDetector.load(face_cascade_name);
@@ -102,9 +109,29 @@ int main(void)
 		exit(1);
 	}
 	
+	//-----------------Load trained data-----------------
+	try
+	{
+		model1->load("trainedData.yml");
+		numFaces = 0;
+		while (!model1->getLabelInfo(numFaces).empty())
+		{
+			numFaces++;
+		}
+		notEmpty = true;
+		//TEST - how many faces in yml file
+		/*cout << numFaces;
+		system("pause");*/
+	}
+	catch (const std::exception&)
+	{
+		notEmpty = false;
+	}
+	
+	//-----------------Main program loop starts-----------------
 	run = true;
 	Mat img;
-	int ID;
+	string ID;
 
 	if (cam.isOpened())
 	{
@@ -120,7 +147,7 @@ int main(void)
 				printf("Option 1 - Detect Faces\n");						//Just box faces and display
 				printf("Option 2 - Train Faces\n");							//Ask user for ID and train
 				printf("Option 3 - Recognise Faces\n");						//Attempt facial recognition
-
+				printf("Option 4 - Wipe Memory\n");						//Wipe data
 				printf("\nType out an option number and hit ENTER\n(S to exit)\n");
 				printf("\nYour Choice: ");
 				cin >> mode;
@@ -150,19 +177,40 @@ int main(void)
 			case '2':
 			{
 				system("cls");
-				printf("Enter person's ID or -1 to stop training\n");
+				printf("Enter student name or s to stop training\n");
 				cin >> ID;
-				if (ID == -1)
+				transform(ID.begin(), ID.end(), ID.begin(), ::easytolower);	//all to lower case
+
+				if (ID.at(0) == 's')		//s to stop training
 					mode = '0';
 				else
-				{
-					//Mat input = img;
-					trainFace(ID);
-					//imshow("Processed", input);
-					int c = waitKey(10);
-					if ((char)c == 's') { mode = '0'; destroyAllWindows(); }
-				}
+				{	
+					int i = 0;
+					bool nameFound = false;
 
+					while (!model1->getLabelInfo(i).empty())
+					{
+						if (model1->getLabelInfo(i).compare(ID) == 0)
+						{
+							nameFound = true;
+							//TEST - Name found in yml file
+							/*cout << "FOUND"<< endl;
+							system("pause");*/
+							break;
+						}
+						i++;
+					}
+					trainFace(ID, nameFound);
+					cin.clear();
+					cin.ignore(256, '\n');
+					break;
+
+					//TEST - Display face after processing
+					//imshow("Processed", input);
+					//int c = waitKey(10);
+					//if ((char)c == 's') { mode = '0'; destroyAllWindows(); }
+					//break;
+				}
 				break;
 			}
 
@@ -170,7 +218,7 @@ int main(void)
 			{
 				int c = waitKey(10);
 				cam >> img;
-				if (!img.empty() && preprocessedFaces.size()>0 && preprocessedFaces.size() == faceLabels.size())
+				if (!img.empty() && preprocessedFaces.size()>0 && preprocessedFaces.size() == faceLabels.size() || notEmpty)
 				{
 					Mat input = img;
 					//namedWindow("Webcam", 1);
@@ -198,7 +246,30 @@ int main(void)
 				if ((char)c == 's') { mode = '0'; destroyAllWindows(); }
 				break;
 			}
-			case 's':
+			case '4':
+			{
+				system("cls");
+				try
+				{
+					faceLabels.clear();
+					stringLabels.clear();
+					preprocessedFaces.clear();
+					model1->~FaceRecognizer();
+					remove("trainedData.yml");
+				}
+				catch (const std::exception&)
+				{
+					cout << "Data failed to delete" << endl << endl;
+					system("pause");
+					mode = '0';
+					break;
+				}
+				cout << "Successfully wiped data"<< endl << endl;
+				system("pause");
+				mode = '0';
+				break;
+			}
+			case 's':	
 			{
 				run = false;
 				break;
@@ -208,9 +279,12 @@ int main(void)
 				run = false;
 				break;
 			}
+
 			default:
 			{
 				system("cls");
+				cin.clear();
+				cin.ignore(256, '\n');
 				destroyAllWindows();
 				mode = '0';
 				printf("Invalid Entry! Please Retry\n");
@@ -229,19 +303,20 @@ int main(void)
 //										FUNCTIONS BELOW
 //**************************************************************************************************
 
-void quickDetect(Mat &image)
+void quickDetect(Mat &input)
 {
+	Mat image = input;
 	faceDetector.detectMultiScale(image, faceRect, 1.2, 2, 0 | CV_HAAR_SCALE_IMAGE, Size(min_face_size, min_face_size), Size(max_face_size, max_face_size));
 	printf("%d faces were detected\n\n", faceRect.size());
 
-	// Draw on the detected faces
+	// Draw rectangles around the detected faces
 	for (int i = 0; i < (int)faceRect.size(); i++)
 	{
 		Point pt1(faceRect[i].x, faceRect[i].y);
 		Point pt2((faceRect[i].x + faceRect[i].height), (faceRect[i].y + faceRect[i].width));
 		rectangle(image, pt1, pt2, Scalar(0, 255, 0), 2, 8, 0);
 	}
-	
+	input = image;
 	if ((int)faceRect.size()>0)
 		facefound = true;
 }
@@ -253,7 +328,6 @@ void quickDetect(Mat &image)
 void detectFaces(Mat &input)
 {
 	Mat img = input;
-	//Vector to hold face boxes
 	Globals::detectManyObjects(img, faceDetector, faceRect, DETECTION_WIDTH);;
 
 	//How many faces did multiscale detect? - [test parameter]
@@ -274,16 +348,14 @@ void detectFaces(Mat &input)
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-void detectEyes(Mat &input)
+void detectEyes(Mat &input) //Takes  in single face and is used to determine if eyes were found
 {
 	Mat img = input;
 	Mat topLeftOfFace;
 	Mat topRightOfFace;
 	Mat gray, face;
 	face = img;
-	/*for (int i = 0; i < (int)faceRect.size(); i++)
-	{
-		face = img(faceRect[i]);*/
+
 		resize(face, face, Size(512, 512), 0, 0, INTER_LINEAR); // This will be needed later while saving images
 		int leftX = cvRound(face.cols * EYE_SX);
 		int topY = cvRound(face.rows * EYE_SY);
@@ -293,9 +365,7 @@ void detectEyes(Mat &input)
 		topLeftOfFace = face(Rect(leftX, topY, widthX, heightY));
 		topRightOfFace = face(Rect(rightX, topY, widthX, heightY));
 
-
 		//EYE DETECTION
-
 		Rect leftEyeRect, rightEyeRect;
 		Point leftEye, rightEye;
 		eyeDetection = true;
@@ -369,8 +439,9 @@ void detectEyes(Mat &input)
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-void trainFace(int m_selectedPerson)
+void trainFace(string name,bool nameFound)
 {
+	double imageDiff=0;
 	Mat img;
 	Mat input;
 	Mat displayedFrame;
@@ -421,7 +492,7 @@ void trainFace(int m_selectedPerson)
 
 			if (old_prepreprocessedFace.data)		//if there exists an old face
 			{
-				imageDiff = getSimilarity(new_preprocessedFace, old_prepreprocessedFace);
+				imageDiff = Globals::getSimilarity(new_preprocessedFace, old_prepreprocessedFace);
 				printf("Difference = %lf\n\n", imageDiff); //test
 			}
 			else //if not, old face = current face
@@ -434,8 +505,8 @@ void trainFace(int m_selectedPerson)
 				// Add the face & mirrored face to the detected face lists.
 				preprocessedFaces.push_back(new_preprocessedFace);
 				preprocessedFaces.push_back(mirroredFace);
-				faceLabels.push_back(m_selectedPerson);
-				faceLabels.push_back(m_selectedPerson);
+				faceLabels.push_back(numFaces);
+				faceLabels.push_back(numFaces);
 				count++;
 				// Keep a copy of the processed face,
 				// to compare on next iteration.
@@ -470,8 +541,8 @@ void trainFace(int m_selectedPerson)
 
 	string facerecAlgorithm = "FaceRecognizer.Eigenfaces";
 	// Use OpenCV's new FaceRecognizer in the "contrib" module:
-	model = Algorithm::create<FaceRecognizer>(facerecAlgorithm);
-	if (model.empty()) {
+	//model = Algorithm::create<FaceRecognizer>(facerecAlgorithm);
+	if (model1.empty()) {
 		cerr << "ERROR: The FaceRecognizer [" << facerecAlgorithm;
 		cerr << "] is not available in your version of OpenCV. ";
 		cerr << "Please update to OpenCV v2.4.1 or newer." << endl;
@@ -479,45 +550,39 @@ void trainFace(int m_selectedPerson)
 	}
 
 
-	model->train(preprocessedFaces, faceLabels);
+	model1->train(preprocessedFaces, faceLabels);
+	stringLabels.insert(pair<int, string>(numFaces, name));
+	model1->setLabelsInfo(stringLabels);											//String name that corresponds to numFace value
+	model1->save("trainedData.yml");												//Write to file
 	printf("trained\n\n");
 
+	if (numFaces != 0 && nameFound == false)	//If name doesn't exist as label and if not first face - this is a new face
+		numFaces++;
 
-
-	Mat averageFace = model->get<Mat>("mean");										//Calculate average face
-																					// Convert a 1D float row matrix to a regular 8-bit image.
-	averageFace = getImageFrom1DFloatMat(averageFace, DESIRED_FACE_HEIGHT);
-
-	////TEST
+	//TEST - show avg face
+	//Mat averageFace = model1->get<Mat>("mean");									//Calculate average face
+	//																				// Convert a 1D float row matrix to a regular 8-bit image.
+	//averageFace = getImageFrom1DFloatMat(averageFace, DESIRED_FACE_HEIGHT);
 	//resize(averageFace, averageFace, Size(256, 256), 0, 0, INTER_LINEAR);
 	//imshow("averageFace", averageFace);
 	//waitKey(0);
 	//destroyAllWindows();
 
-	// Get the eigenvectors
-	Mat eigenvectors = model->get<Mat>("eigenvectors");
-	// Show the best 20 eigenfaces
-	for (int i = 0; i < min(20, eigenvectors.cols); i++) {
-		// Create a continuous column vector from eigenvector #i.
-		Mat eigenvector = eigenvectors.col(i).clone();
-		Mat eigenface = getImageFrom1DFloatMat(eigenvector, DESIRED_FACE_HEIGHT);
 
-		//test
-		/*imshow(format("Eigenface%d", i), eigenface);
-		waitKey(0);
-		destroyAllWindows();*/
-	}
-}
+	//// TEST - Get the eigenvectors
+	//Mat eigenvectors = model1->get<Mat>("eigenvectors");
+	//// Show the best 20 eigenfaces
+	//for (int i = 0; i < min(20, eigenvectors.cols); i++) {
+	//	// Create a continuous column vector from eigenvector #i.
+	//	Mat eigenvector = eigenvectors.col(i).clone();
+	//	Mat eigenface = getImageFrom1DFloatMat(eigenvector, DESIRED_FACE_HEIGHT);
+	//	imshow(format("Eigenface%d", i), eigenface);
+	//	waitKey(0);
+	//	destroyAllWindows();
+	//}
 
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-double getSimilarity(const Mat A, const Mat B) {
-	// Calculate the L2 relative error between the 2 images.
-	double errorL2 = norm(A, B, CV_L2);
-	// Scale the value since L2 is summed across all pixels.
-	double similarity = errorL2 / (double)(A.rows * A.cols);
-	return similarity;
+
 }
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -525,6 +590,7 @@ double getSimilarity(const Mat A, const Mat B) {
 
 void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this function - improve modularity
 {
+	int random;
 	int identity = -1;
 	Mat img = input;
 	Mat face;
@@ -545,36 +611,38 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 			Mat preprocessedFace = face;	
 			// Generate a face approximation by back-projecting the eigenvectors & eigenvalues.
 			Mat reconstructedFace;
-			reconstructedFace = reconstructFace(model, preprocessedFace);
+			reconstructedFace = reconstructFace(model1, preprocessedFace);
 
 			if (m_debug)//test
 				if (reconstructedFace.data)
 					imshow("reconstructedFace", reconstructedFace);
 
 			// Verify whether the reconstructed face looks like the preprocessed face, otherwise it is probably an unknown person.
-			double similarity = getSimilarity(preprocessedFace, reconstructedFace);
+			double similarity = Globals::getSimilarity(preprocessedFace, reconstructedFace);
 
 			string outputStr;
 			if (similarity < UNKNOWN_PERSON_THRESHOLD) {
 				// Identify who the person is in the preprocessed face image.
-				identity = model->predict(preprocessedFace);
-				outputStr = toString(identity);
+				identity = model1->predict(preprocessedFace);
+				outputStr = model1->getLabelInfo(identity);
 
 				//Will train randomly with new recognised face - Done so to improve run speed
 				random = rand() % 10 + 1;
-				//cout << random; testing
-				if (random == 7)
+
+				if (random == 7 || similarity > 0.47)	//EXPERIMENTAL - Might slow down recognition
 				{
 					preprocessedFaces.push_back(preprocessedFace);
 					faceLabels.push_back(identity);
-					model->train(preprocessedFaces, faceLabels);
+					model1->train(preprocessedFaces, faceLabels);
+
 				}
 			}
 			else {
 				// Since the confidence is low, assume it is an unknown person.
 				outputStr = "Unknown";
 			}
-			putText(input, outputStr, Point(faceRect[i].x, faceRect[i].y), CV_FONT_VECTOR0, 1.0, CV_RGB(0, 255, 0), 2.0);
+			//Display above person's name above their face
+			putText(input, outputStr, Point(faceRect[i].x, faceRect[i].y-5), CV_FONT_VECTOR0, 1.0, CV_RGB(0, 255, 0), 2.0);
 			cout << "Identity: " << outputStr << ". Similarity: " << similarity << endl;
 
 			//// Show the confidence rating for the recognition in the mid-top of the display.
@@ -592,25 +660,10 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 			//// Show the gray border of the bar.
 			//rectangle(img, ptTopLeft, ptBottomRight, CV_RGB(200, 200, 200), 1, CV_AA);
 
-			//test
-			//imshow("", img);
-			//waitKey(0);
-			//destroyAllWindows();
 		}
 	}
+	model1->save("trainedData.yml");
 }
-
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -625,6 +678,16 @@ Mat getImageFrom1DFloatMat(const Mat matrixRow, int height)
 	normalize(rectangularMat, dst, 0, 255, NORM_MINMAX,
 		CV_8UC1);
 	return dst;
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+char easytolower(char in) {
+	if (in <= 'Z' && in >= 'A')
+		return in - ('Z' - 'z');
+	return in;
 }
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
