@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <vector>
 #include <iostream>
+#include <fstream>
 #include <stdio.h>
 #include <string>
 #include <time.h>  
@@ -39,9 +40,9 @@ double max_face_size = 300;
 char mode = '0';						//Mode that programming is running in
 bool m_debug = true;					//Temp variable for testing. needs to be applied for all testing cases
 bool eyeDetection = false;				//Will be used to skip histogram equalisation and resizing for eye detection
-bool faceProcessed = false;				//Has the face been processed
-bool facefound = false;					//Has a face been found
-int numFaces;							//The number of faces currently stored in yml file
+bool faceProcessed = false;				//Has the face been processed?
+bool facefound = false;					//Has a face been found?
+int numFaces = 0;						//The number of faces currently stored in yml file
 
 VideoCapture cam(0); //webcam
 vector<Rect> faceRect;					//Value of boxes around detected faces
@@ -79,6 +80,7 @@ void CallBackFunc(int event, int x, int y, int flags, void* userdata)
 		//cout << "Left button of the mouse is clicked - position (" << x << ", " << y << ")" << endl;
 }
 
+
 //**************************************************************************************************
 //										START OF MAIN
 //**************************************************************************************************
@@ -87,11 +89,10 @@ int main(void)
 {
 
 	bool run;				//used to end program
-	bool notEmpty;			//true when the non-empty yml file exists
 	srand(time(NULL));		//for random num gen - recognise will train model with new face when random num = 7
 	
 	//-----------------Load detectors-----------------
-	try {
+	try{
 		faceDetector.load(face_cascade_name);
 		eyeDetector1.load(eye1_cascade_name);
 		eyeDetector2.load(eye2_cascade_name);
@@ -113,21 +114,27 @@ int main(void)
 	try
 	{
 		model1->load("trainedData.yml");
-		numFaces = 0;
-		while (!model1->getLabelInfo(numFaces).empty())
+
+		FileStorage fs("retrainModel.yml", FileStorage::READ);
+		fs["mats"] >> preprocessedFaces;
+		fs["labels"] >> faceLabels;
+		fs.release();
+
+		//get largest int label value
+		for (int i = 0; i < faceLabels.size(); i++)
 		{
-			numFaces++;
+			if (faceLabels.at(i) > numFaces)
+			{
+				numFaces = faceLabels.at(i);
+			}
 		}
-		notEmpty = true;
-		//TEST - how many faces in yml file
-		/*cout << numFaces;
-		system("pause");*/
 	}
 	catch (const std::exception&)
 	{
-		notEmpty = false;
+		//File not found
+		numFaces = 0;
 	}
-	
+
 	//-----------------Main program loop starts-----------------
 	run = true;
 	Mat img;
@@ -151,6 +158,7 @@ int main(void)
 				printf("\nType out an option number and hit ENTER\n(S to exit)\n");
 				printf("\nYour Choice: ");
 				cin >> mode;
+				system("cls");
 				break;
 			}
 
@@ -218,7 +226,7 @@ int main(void)
 			{
 				int c = waitKey(10);
 				cam >> img;
-				if (!img.empty() && preprocessedFaces.size()>0 && preprocessedFaces.size() == faceLabels.size() || notEmpty)
+				if (!img.empty() && preprocessedFaces.size()>0 && preprocessedFaces.size() == faceLabels.size())
 				{
 					Mat input = img;
 					//namedWindow("Webcam", 1);
@@ -243,7 +251,15 @@ int main(void)
 					break;
 				}
 				
-				if ((char)c == 's') { mode = '0'; destroyAllWindows(); }
+				if ((char)c == 's') 
+				{ 
+					mode = '0'; 
+					destroyAllWindows(); 
+					model1->save("trainedData.yml");
+					FileStorage fs("retrainModel.yml", FileStorage::WRITE);
+					fs << "mats" << preprocessedFaces << "labels" << faceLabels;
+					fs.release();
+				}
 				break;
 			}
 			case '4':
@@ -439,9 +455,27 @@ void detectEyes(Mat &input) //Takes  in single face and is used to determine if 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-void trainFace(string name,bool nameFound)
+void trainFace(string name, bool nameFound)
 {
-	double imageDiff=0;
+	int labelNum;
+	if (nameFound == false)	//If name doesn't exist as label - this is a new face/person
+	{
+		labelNum = numFaces;
+	}
+	else
+	{
+		for (int i = 0; i <= numFaces; i++)
+		{
+			if (model1->getLabelInfo(i) == name)	//if name does exist, get int label value to add data to correct person
+			{
+				labelNum = i;
+				break;
+			}
+		}
+		
+	}
+	
+	double imageDiff = 0;
 	Mat img;
 	Mat input;
 	Mat displayedFrame;
@@ -453,7 +487,7 @@ void trainFace(string name,bool nameFound)
 	for (;;)//will break when 10 faces are found
 	{
 		cam >> img;
-		
+
 		if (!img.empty()) {
 			input = img;
 			img.copyTo(displayedFrame);
@@ -505,26 +539,25 @@ void trainFace(string name,bool nameFound)
 				// Add the face & mirrored face to the detected face lists.
 				preprocessedFaces.push_back(new_preprocessedFace);
 				preprocessedFaces.push_back(mirroredFace);
-				faceLabels.push_back(numFaces);
-				faceLabels.push_back(numFaces);
+				faceLabels.push_back(labelNum);
+				faceLabels.push_back(labelNum);
 				count++;
 				// Keep a copy of the processed face,
 				// to compare on next iteration.
 				old_prepreprocessedFace = new_preprocessedFace;
 				old_time = current_time;
 
+				//TEST - face region display
 				// Get access to the face region-of-interest.
-				Mat displayedFaceRegion = displayedFrame(faceRect.at(0));				//at(0) because only one face atm
-																						// Add some brightness to each pixel of the face region.				//unneccesary - just to show user face detected
-				displayedFaceRegion += CV_RGB(90, 90, 90);
-
-				////TEST
+				//Mat displayedFaceRegion = displayedFrame(faceRect.at(0));				//at(0) because only one face atm
+				//																		// Add some brightness to each pixel of the face region.				//unneccesary - just to show user face detected
+				//displayedFaceRegion += CV_RGB(90, 90, 90);
 				//imshow("IMAGE", displayedFaceRegion);
 				//waitKey(0);
 				//destroyWindow("IMAGE");
 			}
 		}
-		if (count>=6)														//once 6 faces have been processed, break for - aka stop collecting
+		if (count >= 6)														//once 6 faces have been processed, break for - aka stop collecting
 			break;
 	}
 
@@ -549,15 +582,15 @@ void trainFace(string name,bool nameFound)
 		exit(1);
 	}
 
-
 	model1->train(preprocessedFaces, faceLabels);
-	stringLabels.insert(pair<int, string>(numFaces, name));
+	stringLabels.insert(pair<int, string>(labelNum, name));
 	model1->setLabelsInfo(stringLabels);											//String name that corresponds to numFace value
 	model1->save("trainedData.yml");												//Write to file
 	printf("trained\n\n");
 
-	if (numFaces != 0 && nameFound == false)	//If name doesn't exist as label and if not first face - this is a new face
-		numFaces++;
+	FileStorage fs("retrainModel.yml", FileStorage::WRITE);
+	fs << "mats" << preprocessedFaces << "labels" <<faceLabels;
+	fs.release();
 
 	//TEST - show avg face
 	//Mat averageFace = model1->get<Mat>("mean");									//Calculate average face
@@ -580,7 +613,10 @@ void trainFace(string name,bool nameFound)
 	//	waitKey(0);
 	//	destroyAllWindows();
 	//}
-
+	if (nameFound == false)	//increment numFaces (person was added)
+	{
+		numFaces++;
+	}
 
 
 }
@@ -662,7 +698,6 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 
 		}
 	}
-	model1->save("trainedData.yml");
 }
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
