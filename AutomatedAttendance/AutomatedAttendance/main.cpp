@@ -26,6 +26,9 @@ char easytolower(char in);
 
 Mat getImageFrom1DFloatMat(const Mat matrixRow, int height);
 Mat reconstructFace(const Ptr<FaceRecognizer> model, const Mat preprocessedFace);
+inline const char * const BoolToString(bool b);
+String getMonth(int month);
+void readFile(string fileName);
 
 // Global variables	
 const double EYE_SX = 0.10;
@@ -36,7 +39,11 @@ const double UNKNOWN_PERSON_THRESHOLD = 0.5;
 const int DETECTION_WIDTH = 800;
 double min_face_size = 20;
 double max_face_size = 300;
+const int classSize = 30;
 
+double startTime;						//Used to det if person is late
+double currentTime;
+double timePassed;
 char mode = '0';						//Mode that programming is running in
 bool m_debug = true;					//Temp variable for testing. needs to be applied for all testing cases
 bool eyeDetection = false;				//Will be used to skip histogram equalisation and resizing for eye detection
@@ -49,6 +56,9 @@ vector<Rect> faceRect;					//Value of boxes around detected faces
 vector<Mat> preprocessedFaces;			//Vector to store preprocessed faces
 vector<int> faceLabels;					//Vector to store facelabels of preprocessed faces
 map<int, string> stringLabels;			//matches int labels to strings (Name of each person)
+vector<bool> Present(classSize);					//Is person present
+vector<bool> Late(classSize);						//Is person late
+vector<double> MinsPassed(classSize);				//What time was person first spotted in lecture
 
 //Location of detectors
 string face_cascade_name = "c:/opencv-build/install/share/OpenCV/haarcascades/haarcascade_frontalface_alt.xml";
@@ -90,7 +100,17 @@ int main(void)
 
 	bool run;				//used to end program
 	srand(time(NULL));		//for random num gen - recognise will train model with new face when random num = 7
+
+	time_t t = time(0);   // get time now
+	struct tm * now = localtime(&t);
+
+	//Count mins	
+	startTime = (double)getTickCount();
 	
+	currentTime = (double)getTickCount();
+	timePassed = ((currentTime - startTime) / getTickFrequency())/60;
+
+
 	//-----------------Load detectors-----------------
 	try{
 		faceDetector.load(face_cascade_name);
@@ -110,6 +130,29 @@ int main(void)
 		exit(1);
 	}
 	
+	//------------------------Train model------------------------
+
+	// Load the "contrib" module is dynamically at runtime.
+	bool haveContribModule = initModule_contrib();
+	if (!haveContribModule) {
+		cerr << "ERROR: The 'contrib' module is needed for ";
+		cerr << "FaceRecognizer but hasn't been loaded to OpenCV!";
+		cerr << endl;
+		exit(1);
+	}
+
+	string facerecAlgorithm = "FaceRecognizer.Eigenfaces";
+	// Use OpenCV's new FaceRecognizer in the "contrib" module:
+	//model = Algorithm::create<FaceRecognizer>(facerecAlgorithm);
+	if (model1.empty()) {
+		cerr << "ERROR: The FaceRecognizer [" << facerecAlgorithm;
+		cerr << "] is not available in your version of OpenCV. ";
+		cerr << "Please update to OpenCV v2.4.1 or newer." << endl;
+		exit(1);
+	}
+
+
+
 	//-----------------Load trained data-----------------
 	try
 	{
@@ -154,8 +197,10 @@ int main(void)
 				printf("Option 1 - Detect Faces\n");						//Just box faces and display
 				printf("Option 2 - Train Faces\n");							//Ask user for ID and train
 				printf("Option 3 - Recognise Faces\n");						//Attempt facial recognition
-				printf("Option 4 - Wipe Memory\n");						//Wipe data
-				printf("\nType out an option number and hit ENTER\n(S to exit)\n");
+				printf("Option 4 - Get Data\n");							//Register and student info
+				printf("Option 5 - Add Student\n");							//Add new student
+				printf("Option 9 - Wipe Memory\n");							//Wipe data
+				printf("\nType out an option number and hit ENTER\n(or s to EXIT)\n");
 				printf("\nYour Choice: ");
 				cin >> mode;
 				system("cls");
@@ -185,7 +230,7 @@ int main(void)
 			case '2':
 			{
 				system("cls");
-				printf("Enter student name or s to stop training\n");
+				printf("Enter student name (or s to return)\n");
 				cin >> ID;
 				transform(ID.begin(), ID.end(), ID.begin(), ::easytolower);	//all to lower case
 
@@ -255,6 +300,18 @@ int main(void)
 				{ 
 					mode = '0'; 
 					destroyAllWindows(); 
+
+					//Write to register
+					String date;
+					date = toString(now->tm_mday) + "_" + getMonth((now->tm_mon));
+					ofstream outFile("Register/"+date + ".txt");
+					outFile << "ID" << "\t" << "Stu Num" << "\t" << "Present" << "\t" << "Time" << "\t" << "Late" << endl;
+					for (int i = 0; i <=numFaces; i++)
+					{
+						outFile << numFaces << "\t" << model1->getLabelInfo(numFaces) <<"\t"<< BoolToString(Present[numFaces]) << "\t" << (int)MinsPassed[numFaces] << "\t" << BoolToString(Late[numFaces]) << endl;
+					}
+					outFile.close();
+					//Save trained data
 					model1->save("trainedData.yml");
 					FileStorage fs("retrainModel.yml", FileStorage::WRITE);
 					fs << "mats" << preprocessedFaces << "labels" << faceLabels;
@@ -265,6 +322,92 @@ int main(void)
 			case '4':
 			{
 				system("cls");
+				string month, day;
+				int intMonth, intDay;
+				printf("Enter month number (or s to return) e.g 1 for Jan\n");
+				cin >> month;
+
+				if (month == "s")
+				{
+					mode = '0';
+					break;
+				}
+				printf("Enter date e.g 17\n");
+				cin >> day;
+
+				system("cls");
+
+				try
+				{
+					intMonth = stoi(month);
+					intMonth -= 1;
+					intDay = stoi(day);
+				}
+				catch (const std::exception&)
+				{
+					cout << "Invalid Entry - Not an integer value\n";
+					break;
+				}
+
+				if (intMonth < 13 && intMonth>=0 && intDay < 32 && intDay>0)
+				{
+					string fileName = "Register/" + day + "_" + getMonth(intMonth) + ".txt";
+					readFile(fileName);
+					system("pause");
+					mode = '0';
+				}
+				else
+				{
+					cout << "Incorrect date provided\n";
+					system("pause");
+				}
+				cin.clear();
+				cin.ignore(256, '\n');
+				break;
+			}
+			case '5':
+			{
+				system("cls");
+				string stdNum, name;
+				printf("Enter Student Number (or s to return)\n");
+				cin >> stdNum;
+				if (stdNum == "s")
+				{
+					mode = '0';
+					break;
+				}
+				cin.clear();
+				cin.ignore(256, '\n');
+				cout << "Enter Student's name and surname\n";
+				getline(cin, name);
+
+				int i = 0;
+				bool nameFound = false;
+				while (!model1->getLabelInfo(i).empty())
+				{
+					if (model1->getLabelInfo(i).compare(stdNum) == 0)
+					{
+						nameFound = true;
+						//TEST - Name found in yml file
+						/*cout << "FOUND"<< endl;
+						system("pause");*/
+						break;
+					}
+					i++;
+				}
+				trainFace(stdNum, nameFound);
+				if (!nameFound)
+				{
+					ofstream outFile("Register/Students.txt", ofstream::app);
+					outFile << numFaces << "\t" << model1->getLabelInfo(numFaces) << "\t" << name << "\t\t" << endl;
+					outFile.close();
+				}	
+				mode = '0';
+				break;
+			}
+			case '9':
+			{
+				system("cls");
 				try
 				{
 					faceLabels.clear();
@@ -272,6 +415,7 @@ int main(void)
 					preprocessedFaces.clear();
 					model1->~FaceRecognizer();
 					remove("trainedData.yml");
+					remove("retrainModel.yml");
 				}
 				catch (const std::exception&)
 				{
@@ -458,8 +602,13 @@ void detectEyes(Mat &input) //Takes  in single face and is used to determine if 
 void trainFace(string name, bool nameFound)
 {
 	int labelNum;
+	bool faceSaved = false;
+
 	if (nameFound == false)	//If name doesn't exist as label - this is a new face/person
 	{
+		if (numFaces != 0)
+			numFaces++;
+
 		labelNum = numFaces;
 	}
 	else
@@ -477,7 +626,7 @@ void trainFace(string name, bool nameFound)
 	
 	double imageDiff = 0;
 	Mat img;
-	Mat input;
+	Mat input,face;
 	Mat displayedFrame;
 	Mat old_prepreprocessedFace;
 	Mat new_preprocessedFace;
@@ -497,6 +646,13 @@ void trainFace(string name, bool nameFound)
 
 			detectFaces(input);				//Find box around face
 
+			face = input;				//Will be written to file
+
+
+			//Display detected face whilst training
+			//imshow("", input);
+			//if (waitKey(1) == 's') {};
+
 			if (facefound)
 			{
 				for (int i = 0; i < (int)faceRect.size(); i++)
@@ -511,17 +667,23 @@ void trainFace(string name, bool nameFound)
 		}
 
 
-		//test
-		/*imshow("", input);
-		waitKey(0);
-		destroyAllWindows();*/
-
 		//get difference in time - since last pic
 		double current_time = (double)getTickCount();
 		double timeDiff_seconds = (current_time - old_time) / getTickFrequency();
 
 		if (faceProcessed)		//if a face was processed, will be stored in new_preprocessedFace
 		{
+			//test - show processed face
+			//imshow("", input);
+			//if (waitKey(1) == 's') {};
+
+			if (!faceSaved && !nameFound)
+			{
+				imwrite("Faces/" + name + ".jpg", face(faceRect[0]));
+				faceSaved = true;
+			}
+				
+
 			new_preprocessedFace = input;
 
 			if (old_prepreprocessedFace.data)		//if there exists an old face
@@ -561,27 +723,6 @@ void trainFace(string name, bool nameFound)
 			break;
 	}
 
-	//------------------------Train model------------------------
-
-	// Load the "contrib" module is dynamically at runtime.
-	bool haveContribModule = initModule_contrib();
-	if (!haveContribModule) {
-		cerr << "ERROR: The 'contrib' module is needed for ";
-		cerr << "FaceRecognizer but hasn't been loaded to OpenCV!";
-		cerr << endl;
-		exit(1);
-	}
-
-	string facerecAlgorithm = "FaceRecognizer.Eigenfaces";
-	// Use OpenCV's new FaceRecognizer in the "contrib" module:
-	//model = Algorithm::create<FaceRecognizer>(facerecAlgorithm);
-	if (model1.empty()) {
-		cerr << "ERROR: The FaceRecognizer [" << facerecAlgorithm;
-		cerr << "] is not available in your version of OpenCV. ";
-		cerr << "Please update to OpenCV v2.4.1 or newer." << endl;
-		exit(1);
-	}
-
 	model1->train(preprocessedFaces, faceLabels);
 	stringLabels.insert(pair<int, string>(labelNum, name));
 	model1->setLabelsInfo(stringLabels);											//String name that corresponds to numFace value
@@ -613,12 +754,6 @@ void trainFace(string name, bool nameFound)
 	//	waitKey(0);
 	//	destroyAllWindows();
 	//}
-	if (nameFound == false)	//increment numFaces (person was added)
-	{
-		numFaces++;
-	}
-
-
 }
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -640,7 +775,6 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 		{
 			detectEyes(face);
 		}
-	
 			
 		if (faceProcessed)
 		{
@@ -670,8 +804,22 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 					preprocessedFaces.push_back(preprocessedFace);
 					faceLabels.push_back(identity);
 					model1->train(preprocessedFaces, faceLabels);
-
 				}
+
+				//Update register info if not already marked present
+				if (!Present[identity])
+				{
+					Present[identity] = true;
+
+					currentTime = (double)getTickCount();
+					timePassed = ((currentTime - startTime) / getTickFrequency()) / 60;
+					MinsPassed[identity] = timePassed;
+
+					if (timePassed > 15)
+						Late[identity] = true;
+				}
+				//Test - register values
+				//cout << identity  << " "<< Present[identity] << " " << MinsPassed[identity] << " " << Late[identity] << endl;
 			}
 			else {
 				// Since the confidence is low, assume it is an unknown person.
@@ -680,6 +828,8 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 			//Display above person's name above their face
 			putText(input, outputStr, Point(faceRect[i].x, faceRect[i].y-5), CV_FONT_VECTOR0, 1.0, CV_RGB(0, 255, 0), 2.0);
 			cout << "Identity: " << outputStr << ". Similarity: " << similarity << endl;
+
+
 
 			//// Show the confidence rating for the recognition in the mid-top of the display.
 			//int cx = (input.cols - DESIRED_FACE_WIDTH) / 2;
@@ -780,3 +930,84 @@ Mat reconstructFace(const Ptr<FaceRecognizer> model, const Mat preprocessedFace)
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+inline const char * const BoolToString(bool b)
+{
+	return b ? "[x]" : "[ ]";
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+String getMonth(int month)
+{
+	switch (month)
+	{
+	case 0:
+		return "Jan";
+		break;
+	case 1:
+		return "Feb";
+		break;
+	case 2:
+		return "Mar";
+		break;
+	case 3:
+		return "Apr";
+		break;
+	case 4:
+		return "May";
+		break;
+	case 5:
+		return "June";
+		break;
+	case 6:
+		return "July";
+		break;
+	case 7:
+		return "Aug";
+		break;
+	case 8:
+		return "Sep";
+		break;
+	case 9:
+		return "Oct";
+		break;
+	case 10:
+		return "Nov";
+		break;
+	case 11:
+		return "Dec";
+		break;
+	default:
+		return "NULL";
+		break;
+	}
+}
+
+void readFile(string fileName)
+{
+	string id, stuNum, pres, mins, delay;
+	try
+	{
+		ifstream myfile(fileName);
+		string line;
+		if (myfile.is_open())
+		{
+			while (!myfile.eof())
+			{
+				getline(myfile, line);
+				cout << line << '\n';
+			}
+			myfile.close();
+		}
+		else
+		{
+			cout << "No data exists for this date" << endl;
+		}
+	}
+	catch (const std::exception&)
+	{
+		cout << "No data exists for this date" << endl;
+	}
+}
