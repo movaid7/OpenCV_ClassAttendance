@@ -104,12 +104,8 @@ int main(void)
 	time_t t = time(0);   // get time now
 	struct tm * now = localtime(&t);
 
-	//Count mins	
+	//Get the time at program run - corresponds to lecture start	
 	startTime = (double)getTickCount();
-	
-	currentTime = (double)getTickCount();
-	timePassed = ((currentTime - startTime) / getTickFrequency())/60;
-
 
 	//-----------------Load detectors-----------------
 	try{
