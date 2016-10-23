@@ -213,3 +213,4 @@ ModelManifest.xml
 AutomatedAttendance/AutomatedAttendance.VC.opendb
 AutomatedAttendance/AutomatedAttendance/Thumbs.db
 AutomatedAttendance/AutomatedAttendance/Pictures/Thumbs.db
+*.db
