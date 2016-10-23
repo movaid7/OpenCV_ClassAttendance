@@ -29,22 +29,28 @@ Mat reconstructFace(const Ptr<FaceRecognizer> model, const Mat preprocessedFace)
 inline const char * const BoolToString(bool b);
 String getMonth(int month);
 void readFile(string fileName);
+void getDailyRegister(string month, string day, int intMonth, int intDay);
+Rect drawButton(Mat img, string text, Point coord, int minWidth = 0);
+bool isPointInRect(const Point pt, const Rect rc);
+Rect drawString(Mat img, string text, Point coord, Scalar color, float fontScale = 0.5f, int thickness = 1, int fontFace = CV_FONT_VECTOR0);
 
 // Global variables	
 const double EYE_SX = 0.10;
 const double EYE_SY = 0.19;
 const double EYE_SW = 0.40;
 const double EYE_SH = 0.36;
-const double UNKNOWN_PERSON_THRESHOLD = 0.5;
+const double UNKNOWN_PERSON_THRESHOLD = 0.7;
 const int DETECTION_WIDTH = 800;
 double min_face_size = 20;
 double max_face_size = 300;
 const int classSize = 30;
+const int border = 8;
 
 double startTime;						//Used to det if person is late
 double currentTime;
 double timePassed;
 char mode = '0';						//Mode that programming is running in
+char option = '0';
 bool m_debug = true;					//Temp variable for testing. needs to be applied for all testing cases
 bool eyeDetection = false;				//Will be used to skip histogram equalisation and resizing for eye detection
 bool faceProcessed = false;				//Has the face been processed?
@@ -56,9 +62,15 @@ vector<Rect> faceRect;					//Value of boxes around detected faces
 vector<Mat> preprocessedFaces;			//Vector to store preprocessed faces
 vector<int> faceLabels;					//Vector to store facelabels of preprocessed faces
 map<int, string> stringLabels;			//matches int labels to strings (Name of each person)
-vector<bool> Present(classSize);					//Is person present
-vector<bool> Late(classSize);						//Is person late
-vector<double> MinsPassed(classSize);				//What time was person first spotted in lecture
+vector<bool> Present(classSize);		//Is person present
+vector<bool> Late(classSize);			//Is person late
+vector<double> MinsPassed(classSize);	//What time was person first spotted in lecture
+
+//On-screen buttons
+Rect button_recog;
+Rect button_new;
+Rect button_train;
+Rect button_data;
 
 //Location of detectors
 string face_cascade_name = "c:/opencv-build/install/share/OpenCV/haarcascades/haarcascade_frontalface_alt.xml";
@@ -77,19 +89,27 @@ void CallBackFunc(int event, int x, int y, int flags, void* userdata)
 	if (event != EVENT_LBUTTONDOWN)
 		return;
 
-		if (x<145 && x>67 && y<450 && y>425)
-		{
-			destroyAllWindows();
-			mode = '2';
-		}
-		else if (x<580 && x>420 && y<450 && y>425)
-		{
-			destroyAllWindows();
-			mode = '3';
-		}
+	Point pt = Point(x, y);
+
+	if (isPointInRect(pt, button_recog)) {
+		destroyAllWindows();
+		mode = '3';
+	}
+	else if (isPointInRect(pt, button_new)) {
+		destroyAllWindows();
+		mode = '5';
+	}
+	else if (isPointInRect(pt, button_train)) {
+		destroyAllWindows();
+		mode = '2';
+	}
+	else if (isPointInRect(pt, button_data)) {
+		destroyAllWindows();
+		mode = '4';
+	}
+	return;
 		//cout << "Left button of the mouse is clicked - position (" << x << ", " << y << ")" << endl;
 }
-
 
 //**************************************************************************************************
 //										START OF MAIN
@@ -97,12 +117,11 @@ void CallBackFunc(int event, int x, int y, int flags, void* userdata)
 
 int main(void)
 {
-
 	bool run;				//used to end program
 	srand(time(NULL));		//for random num gen - recognise will train model with new face when random num = 7
 
-	time_t t = time(0);   // get time now
-	struct tm * now = localtime(&t);
+	time_t t = time(0);   
+	struct tm *now = localtime(&t); //current time
 
 	//Get the time at program run - corresponds to lecture start	
 	startTime = (double)getTickCount();
@@ -153,7 +172,6 @@ int main(void)
 	try
 	{
 		model1->load("trainedData.yml");
-
 		FileStorage fs("retrainModel.yml", FileStorage::READ);
 		fs["mats"] >> preprocessedFaces;
 		fs["labels"] >> faceLabels;
@@ -211,12 +229,15 @@ int main(void)
 					cam >> img;
 					quickDetect(img);
 					namedWindow("Automated Attendence", 1);
+					
+					button_recog = drawButton(img, "Recognise Mode", Point(border,border));
+					button_new = drawButton(img, "New Student", Point(button_recog.x, button_recog.y+ button_recog.height),button_recog.width);
+					button_train = drawButton(img, "Train Face", Point(button_new.x, button_new.y + button_new.height), button_recog.width);
+					button_data = drawButton(img, "Register Data", Point(button_new.x, button_train.y + button_train.height), button_recog.width);
+
 					setMouseCallback("Automated Attendence", CallBackFunc, NULL);
-					putText(img, "Train", Point(70, 450), CV_FONT_VECTOR0, 1.0, CV_RGB(255, 255, 255), 3.0);
-					putText(img, "Train", Point(70, 450), CV_FONT_VECTOR0, 1.0, CV_RGB(0, 0, 0), 2.0);
-					putText(img, "Recognise", Point(420, 450), CV_FONT_VECTOR0, 1.0, CV_RGB(255, 255, 255), 3.0);
-					putText(img, "Recognise", Point(420, 450), CV_FONT_VECTOR0, 1.0, CV_RGB(0, 0, 0), 2.0);
 					imshow("Automated Attendence", img);
+
 					// press 's' to escape
 					if (waitKey(1) == 's') { mode = '0'; destroyAllWindows();  break; };
 				}
@@ -230,30 +251,54 @@ int main(void)
 				cin >> ID;
 				transform(ID.begin(), ID.end(), ID.begin(), ::easytolower);	//all to lower case
 
-				if (ID.at(0) == 's')		//s to stop training
+				if (ID == "s")		//s to stop training
 					mode = '0';
 				else
 				{	
 					int i = 0;
 					bool nameFound = false;
 
-					while (!model1->getLabelInfo(i).empty())
+					try
 					{
-						if (model1->getLabelInfo(i).compare(ID) == 0)
+						while (!model1->getLabelInfo(i).empty())
 						{
-							nameFound = true;
-							//TEST - Name found in yml file
-							/*cout << "FOUND"<< endl;
-							system("pause");*/
-							break;
+							if (model1->getLabelInfo(i).compare(ID) == 0)
+							{
+								nameFound = true;	//Person exists in model
+								break;
+							}
+							i++;
 						}
-						i++;
 					}
-					trainFace(ID, nameFound);
+					catch (const std::exception&)
+					{
+						nameFound = false;
+					}
+					
+					if (nameFound == false)
+					{
+						system("cls");
+						cout << "This student does not exist\nPlease Retry or ADD the student\n" << endl;
+						system("pause");
+					}
+					else
+					{
+						system("cls");
+						cout << "\nPlease ensure that no other faces are within frame\n" << endl;
+						system("pause");
+						system("cls");
+						trainFace(ID, nameFound);
+						cout << "Training Successfully Completed!!" << endl;
+						cout << "Do you wish to continue training (Y/N): ";
+						cin >> mode;
+						if (mode == 'Y' || mode == 'y')
+							mode = '2';
+						else
+							mode = '0';
+					}
 					cin.clear();
 					cin.ignore(256, '\n');
 					break;
-
 					//TEST - Display face after processing
 					//imshow("Processed", input);
 					//int c = waitKey(10);
@@ -265,7 +310,7 @@ int main(void)
 
 			case '3':
 			{
-				int c = waitKey(10);
+				int c = waitKey(1);
 				cam >> img;
 				if (!img.empty() && preprocessedFaces.size()>0 && preprocessedFaces.size() == faceLabels.size())
 				{
@@ -291,7 +336,6 @@ int main(void)
 					system("pause");
 					break;
 				}
-				
 				if ((char)c == 's') 
 				{ 
 					mode = '0'; 
@@ -317,48 +361,91 @@ int main(void)
 			}
 			case '4':
 			{
-				system("cls");
-				string month, day;
-				int intMonth, intDay;
-				printf("Enter month number (or s to return) e.g 1 for Jan\n");
-				cin >> month;
+				switch (option) //Data Menu
+				{
+					case '0':
+					{
+						system("cls");
+						printf("GET-DATA MENU\n");
+						printf("Option 1 - View All Course Participants\n");
+						printf("Option 2 - View Daily Register\n");
+						printf("\nType out an option number and hit ENTER\n(or s to EXIT)\n");
+						printf("\nYour Choice: ");
+						cin >> option;
+						system("cls");
+						break;
+					}
+					case '1':
+					{
+						system("cls");
+						cout << "ID\tStu Num\t\tName" << endl;
+						readFile("Register/Students.txt");
+						cout << endl;
+						system("pause");
+						option = '0';
+						break;
+					}
+					case '2':
+					{
+						option = '0';
+						system("cls");
+						string month, day;
+						int intMonth, intDay;
+						printf("Enter month number (or s to return) e.g 1 for Jan\n");
+						cin >> month;
 
-				if (month == "s")
-				{
-					mode = '0';
-					break;
-				}
-				printf("Enter date e.g 17\n");
-				cin >> day;
+						if (month == "s" || month == "S")
+						{
+							system("cls");
+							option = '0';
+							break;
+						}
+						printf("Enter date e.g 17\n");
+						cin >> day;
 
-				system("cls");
+						system("cls");
 
-				try
-				{
-					intMonth = stoi(month);
-					intMonth -= 1;
-					intDay = stoi(day);
-				}
-				catch (const std::exception&)
-				{
-					cout << "Invalid Entry - Not an integer value\n";
-					break;
+						try
+						{
+							intMonth = stoi(month);
+							intMonth -= 1;
+							intDay = stoi(day);
+						}
+						catch (const std::exception&)
+						{
+							cout << "Invalid Entry - Not an integer value\n";
+							break;
+						}
+						getDailyRegister(month, day, intMonth, intDay);
+						break;
+					}
+					case 's':
+					{
+						option = '0';
+						mode = '0';
+						break;
+					}
+					case 'S':
+					{
+						option = '0';
+						mode = '0';
+						break;
+					}
+					default:
+					{
+						system("cls");
+						cin.clear();
+						cin.ignore(256, '\n');
+						destroyAllWindows();
+						option = '0';
+						printf("Invalid Entry! Please Retry\n");
+						system("pause");
+						break;
+					}
 				}
 
-				if (intMonth < 13 && intMonth>=0 && intDay < 32 && intDay>0)
-				{
-					string fileName = "Register/" + day + "_" + getMonth(intMonth) + ".txt";
-					readFile(fileName);
-					system("pause");
-					mode = '0';
-				}
-				else
-				{
-					cout << "Incorrect date provided\n";
-					system("pause");
-				}
+				//-------------------------------------------------------------------
 				cin.clear();
-				cin.ignore(256, '\n');
 				break;
 			}
 			case '5':
@@ -367,7 +454,7 @@ int main(void)
 				string stdNum, name;
 				printf("Enter Student Number (or s to return)\n");
 				cin >> stdNum;
-				if (stdNum == "s")
+				if (stdNum == "s"  || stdNum == "S")
 				{
 					mode = '0';
 					break;
@@ -384,14 +471,17 @@ int main(void)
 					if (model1->getLabelInfo(i).compare(stdNum) == 0)
 					{
 						nameFound = true;
-						//TEST - Name found in yml file
-						/*cout << "FOUND"<< endl;
-						system("pause");*/
 						break;
 					}
 					i++;
 				}
+				system("cls");
+				cout << "Please ensure that no other faces are within frame\n" << endl;
+				system("pause");
+				system("cls");
 				trainFace(stdNum, nameFound);
+				cout << "Student Successfully Added!!" << endl;
+				system("pause");
 				if (!nameFound)
 				{
 					ofstream outFile("Register/Students.txt", ofstream::app);
@@ -409,9 +499,13 @@ int main(void)
 					faceLabels.clear();
 					stringLabels.clear();
 					preprocessedFaces.clear();
-					model1->~FaceRecognizer();
+					Present.clear();
+					Late.clear();
+					MinsPassed.clear();
+					model1 = createEigenFaceRecognizer();
 					remove("trainedData.yml");
 					remove("retrainModel.yml");
+					numFaces = 0;
 				}
 				catch (const std::exception&)
 				{
@@ -420,7 +514,7 @@ int main(void)
 					mode = '0';
 					break;
 				}
-				cout << "Successfully wiped data"<< endl << endl;
+				cout << "Successfully Wiped Data"<< endl << endl;
 				system("pause");
 				mode = '0';
 				break;
@@ -641,27 +735,21 @@ void trainFace(string name, bool nameFound)
 			faceProcessed = false;
 
 			detectFaces(input);				//Find box around face
-
 			face = input;				//Will be written to file
 
-
 			//Display detected face whilst training
-			//imshow("", input);
-			//if (waitKey(1) == 's') {};
+			imshow("", input);
+			if (waitKey(1) == 's') {};
 
-			if (facefound)
+			if (facefound && (int)faceRect.size() == 1)
 			{
-				for (int i = 0; i < (int)faceRect.size(); i++)
-				{
-					input = input(faceRect[i]);
+					input = input(faceRect[0]);
 					detectEyes(input);
-				}
 			}
 		}
 		else {
 			printf("(!)-- No captured frame --(!)\n\n");
 		}
-
 
 		//get difference in time - since last pic
 		double current_time = (double)getTickCount();
@@ -679,7 +767,6 @@ void trainFace(string name, bool nameFound)
 				faceSaved = true;
 			}
 				
-
 			new_preprocessedFace = input;
 
 			if (old_prepreprocessedFace.data)		//if there exists an old face
@@ -715,7 +802,7 @@ void trainFace(string name, bool nameFound)
 				//destroyWindow("IMAGE");
 			}
 		}
-		if (count >= 6)														//once 6 faces have been processed, break for - aka stop collecting
+		if (count >= 10)														//once enough faces have been processed, break for loop - aka stop collecting faces
 			break;
 	}
 
@@ -761,6 +848,7 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 	int identity = -1;
 	Mat img = input;
 	Mat face;
+	double conf;
 	quickDetect(img);
 
 	for (int i = 0; i < (int)faceRect.size(); i++)
@@ -789,39 +877,45 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 			string outputStr;
 			if (similarity < UNKNOWN_PERSON_THRESHOLD) {
 				// Identify who the person is in the preprocessed face image.
-				identity = model1->predict(preprocessedFace);
+				model1->predict(preprocessedFace,identity,conf);
 				outputStr = model1->getLabelInfo(identity);
+				if(identity<0)break;
+				cout << conf <<endl;
 
-				//Will train randomly with new recognised face - Done so to improve run speed
-				random = rand() % 10 + 1;
-
-				if (random == 7 || similarity > 0.47)	//EXPERIMENTAL - Might slow down recognition
+				if (conf < 2500)
 				{
-					preprocessedFaces.push_back(preprocessedFace);
-					faceLabels.push_back(identity);
-					model1->train(preprocessedFaces, faceLabels);
+					//Will train randomly with new recognised face - Done so to improve run speed
+					random = rand() % 10 + 1;
+
+					if (random == 7 || similarity > 0.47 || conf > 2000)	//EXPERIMENTAL - Might slow down recognition
+					{
+						preprocessedFaces.push_back(preprocessedFace);
+						faceLabels.push_back(identity);
+						model1->train(preprocessedFaces, faceLabels);
+					}
+
+					//Update register info if not already marked present
+					if (identity > 0 && !Present[identity])
+					{
+						Present[identity] = true;
+
+						currentTime = (double)getTickCount();
+						timePassed = ((currentTime - startTime) / getTickFrequency()) / 60;
+						MinsPassed[identity] = timePassed;
+
+						if (timePassed > 15)
+							Late[identity] = true;
+					}
+					//Test - register values
+					//cout << identity  << " "<< Present[identity] << " " << MinsPassed[identity] << " " << Late[identity] << endl;
 				}
-
-				//Update register info if not already marked present
-				if (!Present[identity])
-				{
-					Present[identity] = true;
-
-					currentTime = (double)getTickCount();
-					timePassed = ((currentTime - startTime) / getTickFrequency()) / 60;
-					MinsPassed[identity] = timePassed;
-
-					if (timePassed > 15)
-						Late[identity] = true;
-				}
-				//Test - register values
-				//cout << identity  << " "<< Present[identity] << " " << MinsPassed[identity] << " " << Late[identity] << endl;
+				
 			}
-			else {
+			if(similarity > UNKNOWN_PERSON_THRESHOLD || conf > 2500 || identity <0) {
 				// Since the confidence is low, assume it is an unknown person.
 				outputStr = "Unknown";
 			}
-			//Display above person's name above their face
+			//Display person's name above their face
 			putText(input, outputStr, Point(faceRect[i].x, faceRect[i].y-5), CV_FONT_VECTOR0, 1.0, CV_RGB(0, 255, 0), 2.0);
 			cout << "Identity: " << outputStr << ". Similarity: " << similarity << endl;
 
@@ -981,6 +1075,9 @@ String getMonth(int month)
 	}
 }
 
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 void readFile(string fileName)
 {
 	string id, stuNum, pres, mins, delay;
@@ -1007,3 +1104,99 @@ void readFile(string fileName)
 		cout << "No data exists for this date" << endl;
 	}
 }
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+void getDailyRegister(string month, string day,int intMonth,int intDay)
+{
+
+	if (intMonth < 13 && intMonth >= 0 && intDay < 32 && intDay>0)
+	{
+		string fileName = "Register/" + day + "_" + getMonth(intMonth) + ".txt";
+		readFile(fileName);
+		system("pause");
+		mode = '0';
+	}
+	else
+	{
+		cout << "Incorrect date provided\n";
+		system("pause");
+	}
+
+	return;
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+bool isPointInRect(const Point pt, const Rect rc)
+{
+	if (pt.x >= rc.x && pt.x <= (rc.x + rc.width - 1))
+		if (pt.y >= rc.y && pt.y <= (rc.y + rc.height - 1))
+			return true;
+
+	return false;
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Rect drawButton(Mat img, string text, Point coord, int minWidth)
+{
+	int B = border;
+	Point textCoord = Point(coord.x + B, coord.y + B);
+	// Get the bounding box around the text.
+	Rect rcText = drawString(img, text, textCoord, CV_RGB(0, 0, 0));
+	// Draw a filled rectangle around the text.
+	Rect rcButton = Rect(rcText.x - B, rcText.y - B, rcText.width + 2 * B, rcText.height + 2 * B);
+	// Set a minimum button width.
+	if (rcButton.width < minWidth)
+		rcButton.width = minWidth;
+	// Make a semi-transparent white rectangle.
+	Mat matButton = img(rcButton);
+	matButton += CV_RGB(90, 90, 90);
+	// Draw a non-transparent white border.
+	rectangle(img, rcButton, CV_RGB(200, 200, 200), 1, CV_AA);
+	
+	// Draw the actual text that will be displayed, using anti-aliasing.
+	drawString(img, text, textCoord, CV_RGB(0,0,0));
+	return rcButton;
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Rect drawString(Mat img, string text, Point coord, Scalar color, float fontScale, int thickness, int fontFace)
+{
+	// Get the text size & baseline.
+	int baseline = 0;
+	Size textSize = getTextSize(text, fontFace, fontScale, thickness, &baseline);
+	baseline += thickness;
+
+	// Adjust the coords for left/right-justified or top/bottom-justified.
+	if (coord.y >= 0) {
+		// Coordinates are for the top-left corner of the text from the top-left of the image, so move down by one row.
+		coord.y += textSize.height;
+	}
+	else {
+		// Coordinates are for the bottom-left corner of the text from the bottom-left of the image, so come up from the bottom.
+		coord.y += img.rows - baseline + 1;
+	}
+	// Become right-justified if desired.
+	if (coord.x < 0) {
+		coord.x += img.cols - textSize.width + 1;
+	}
+
+	// Get the bounding box around the text.
+	Rect boundingRect = Rect(coord.x, coord.y - textSize.height, textSize.width, baseline + textSize.height);
+
+	// Draw anti-aliased text.
+	putText(img, text, coord, fontFace, fontScale, color, thickness, CV_AA);
+
+	// Let the user know how big their text is, in case they want to arrange things.
+	return boundingRect;
+}
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

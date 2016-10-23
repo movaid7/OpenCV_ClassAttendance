@@ -12,8 +12,8 @@
 using namespace std;
 using namespace cv;
 
-const int DESIRED_FACE_WIDTH	= 70;
-const int DESIRED_FACE_HEIGHT	= 80;
+const int DESIRED_FACE_WIDTH	= 120;
+const int DESIRED_FACE_HEIGHT	= 120;
 const int DESIRED_LEFT_EYE_Y	= 0.16;
 
 class Detect
