@@ -1,0 +1,2 @@
+ID	Stu Num	Present	Time	Late
+0	3456789	[ ]	0	[ ]

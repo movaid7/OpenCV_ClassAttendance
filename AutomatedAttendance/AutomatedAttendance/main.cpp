@@ -13,9 +13,6 @@
 #include "Globals.h"
 #include "Detect.h"
 
-using namespace std;
-using namespace cv;
-
 // Function Headers
 template <typename T> string toString(T t);
 void detectFaces(Mat &img);
@@ -81,7 +78,7 @@ CascadeClassifier faceDetector;
 CascadeClassifier eyeDetector1;
 CascadeClassifier eyeDetector2;
 
-Ptr<FaceRecognizer> model1 = createEigenFaceRecognizer();
+Ptr<FaceRecognizer> model1 = createEigenFaceRecognizer(0, 3000);
 
 //------------------------------------MOUSE CLICKS------------------------------------
 void CallBackFunc(int event, int x, int y, int flags, void* userdata)
@@ -230,10 +227,10 @@ int main(void)
 					quickDetect(img);
 					namedWindow("Automated Attendence", 1);
 					
-					button_recog = drawButton(img, "Recognise Mode", Point(border,border));
-					button_new = drawButton(img, "New Student", Point(button_recog.x, button_recog.y+ button_recog.height),button_recog.width);
-					button_train = drawButton(img, "Train Face", Point(button_new.x, button_new.y + button_new.height), button_recog.width);
-					button_data = drawButton(img, "Register Data", Point(button_new.x, button_train.y + button_train.height), button_recog.width);
+					button_recog = drawButton(img, "Recognise Mode", Point(border+30,border));
+					button_new = drawButton(img, "New Student", Point(button_recog.x+button_recog.width, button_recog.y),button_recog.width);
+					button_train = drawButton(img, "Train Face", Point(button_new.x+button_recog.width, button_new.y), button_recog.width);
+					button_data = drawButton(img, "Register Data", Point(button_train.x+button_recog.width, button_train.y), button_recog.width);
 
 					setMouseCallback("Automated Attendence", CallBackFunc, NULL);
 					imshow("Automated Attendence", img);
@@ -317,7 +314,7 @@ int main(void)
 					Mat input = img;
 					//namedWindow("Webcam", 1);
 					recogniseFace(input);
-					imshow("Webcam", img);
+					imshow("Webcam", input);
 				}
 				else
 				{
@@ -502,7 +499,7 @@ int main(void)
 					Present.clear();
 					Late.clear();
 					MinsPassed.clear();
-					model1 = createEigenFaceRecognizer();
+					model1 = createEigenFaceRecognizer(0,3000);
 					remove("trainedData.yml");
 					remove("retrainModel.yml");
 					numFaces = 0;
@@ -792,6 +789,9 @@ void trainFace(string name, bool nameFound)
 				old_prepreprocessedFace = new_preprocessedFace;
 				old_time = current_time;
 
+				string c = to_string(count);
+				imwrite("Faces/" + name + "_" + c + ".jpg", new_preprocessedFace);
+
 				//TEST - face region display
 				// Get access to the face region-of-interest.
 				//Mat displayedFaceRegion = displayedFrame(faceRect.at(0));				//at(0) because only one face atm
@@ -811,6 +811,7 @@ void trainFace(string name, bool nameFound)
 	model1->setLabelsInfo(stringLabels);											//String name that corresponds to numFace value
 	model1->save("trainedData.yml");												//Write to file
 	printf("trained\n\n");
+	destroyAllWindows();
 
 	FileStorage fs("retrainModel.yml", FileStorage::WRITE);
 	fs << "mats" << preprocessedFaces << "labels" <<faceLabels;
@@ -842,6 +843,25 @@ void trainFace(string name, bool nameFound)
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+
+//static Mat norm_0_255(InputArray _src) {
+//	Mat src = _src.getMat();
+//	// Create and return normalized image:
+//	Mat dst;
+//	switch (src.channels()) {
+//	case 1:
+//		cv::normalize(_src, dst, 0, 255, NORM_MINMAX, CV_8UC1);
+//		break;
+//	case 3:
+//		cv::normalize(_src, dst, 0, 255, NORM_MINMAX, CV_8UC3);
+//		break;
+//	default:
+//		src.copyTo(dst);
+//		break;
+//	}
+//	return dst;
+//}
+
 void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this function - improve modularity
 {
 	int random;
@@ -853,6 +873,8 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 
 	for (int i = 0; i < (int)faceRect.size(); i++)
 	{
+		identity = -1;
+		conf = 99999;
 		faceProcessed = false;
 		face = img(faceRect[i]);
 		if (facefound)
@@ -862,32 +884,34 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 			
 		if (faceProcessed)
 		{
-			Mat preprocessedFace = face;	
+			Mat preprocessedFace = face;			
 			// Generate a face approximation by back-projecting the eigenvectors & eigenvalues.
-			Mat reconstructedFace;
-			reconstructedFace = reconstructFace(model1, preprocessedFace);
+			 Mat reconstructedFace = reconstructFace(model1, preprocessedFace);
 
-			if (m_debug)//test
-				if (reconstructedFace.data)
-					imshow("reconstructedFace", reconstructedFace);
+			//if (m_debug)//test
+			//	if (reconstructedFace.data)
+			//		imshow("reconstructedFace", reconstructedFace);
 
 			// Verify whether the reconstructed face looks like the preprocessed face, otherwise it is probably an unknown person.
 			double similarity = Globals::getSimilarity(preprocessedFace, reconstructedFace);
 
 			string outputStr;
 			if (similarity < UNKNOWN_PERSON_THRESHOLD) {
+				identity = -1;
+				conf = 9999;
 				// Identify who the person is in the preprocessed face image.
 				model1->predict(preprocessedFace,identity,conf);
-				outputStr = model1->getLabelInfo(identity);
-				if(identity<0)break;
-				cout << conf <<endl;
+				//if (identity<0 || conf>2200)break;
 
-				if (conf < 2500)
+				outputStr = model1->getLabelInfo(identity);
+				cout << "Confidence: " << conf <<endl;
+
+				if (conf < 2200)
 				{
 					//Will train randomly with new recognised face - Done so to improve run speed
 					random = rand() % 10 + 1;
 
-					if (random == 7 || similarity > 0.47 || conf > 2000)	//EXPERIMENTAL - Might slow down recognition
+					if (random == 7 || conf > 2000)	//EXPERIMENTAL - Might slow down recognition
 					{
 						preprocessedFaces.push_back(preprocessedFace);
 						faceLabels.push_back(identity);
@@ -911,7 +935,7 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 				}
 				
 			}
-			if(similarity > UNKNOWN_PERSON_THRESHOLD || conf > 2500 || identity <0) {
+			if(similarity > UNKNOWN_PERSON_THRESHOLD || conf > 2200 || identity <0) {
 				// Since the confidence is low, assume it is an unknown person.
 				outputStr = "Unknown";
 			}
@@ -919,9 +943,28 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 			putText(input, outputStr, Point(faceRect[i].x, faceRect[i].y-5), CV_FONT_VECTOR0, 1.0, CV_RGB(0, 255, 0), 2.0);
 			cout << "Identity: " << outputStr << ". Similarity: " << similarity << endl;
 
+			//int height = preprocessedFaces[0].rows;
+
+			//Mat eigenvalues = model1->getMat("eigenvalues");
+			//// And we can do the same to display the Eigenvectors (read Eigenfaces):
+			//Mat W = model1->getMat("eigenvectors");
+			//// From this we will display the (at most) first 10 Eigenfaces:
+			//for (int i = 0; i < min(10, W.cols); i++) {
+			//	string msg = format("Eigenvalue #%d = %.5f", i, eigenvalues.at<double>(i));
+			//	cout << msg << endl;
+			//	// get eigenvector #i
+			//	Mat ev = W.col(i).clone();
+			//	// Reshape to original size & normalize to [0...255] for imshow.
+			//	Mat grayscale = norm_0_255(ev.reshape(1, height));
+			//	// Show the image & apply a Jet colormap for better sensing.
+			//	//Mat cgrayscale;
+			//	//applyColorMap(grayscale, cgrayscale, COLORMAP_JET);
+			//	imshow(format("%d", i), grayscale);
+			//}
+			//waitKey(0);
 
 
-			//// Show the confidence rating for the recognition in the mid-top of the display.
+			// Show the confidence rating for the recognition in the mid-top of the display.
 			//int cx = (input.cols - DESIRED_FACE_WIDTH) / 2;
 			//Point ptBottomRight = Point(cx - 5, 8 + DESIRED_FACE_HEIGHT);
 			//Point ptTopLeft = Point(cx - 15, 8);
