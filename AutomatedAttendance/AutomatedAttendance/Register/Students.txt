@@ -1,9 +1,2 @@
-0	214505927	Mo		
-0	214505927	Ahmad Khalid		
-0	214505927	Mo Vaid		
-0	3456789	mo v		
-0	1234567	mo va		
-0	56789	sdffghj fghjk		
-0	2234567890	Mo ba		
-0	56789	sdfg dfghjk		
-0	5678	ghj ghui		
+ID	Stu Num		Name
+1	214505927	Mo Vaid		

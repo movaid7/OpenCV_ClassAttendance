@@ -78,7 +78,7 @@ CascadeClassifier faceDetector;
 CascadeClassifier eyeDetector1;
 CascadeClassifier eyeDetector2;
 
-Ptr<FaceRecognizer> model1 = createEigenFaceRecognizer(0, 3000);
+Ptr<FaceRecognizer> model1 = createEigenFaceRecognizer();
 
 //------------------------------------MOUSE CLICKS------------------------------------
 void CallBackFunc(int event, int x, int y, int flags, void* userdata)
@@ -163,8 +163,7 @@ int main(void)
 		exit(1);
 	}
 
-
-
+	
 	//-----------------Load trained data-----------------
 	try
 	{
@@ -181,6 +180,11 @@ int main(void)
 			{
 				numFaces = faceLabels.at(i);
 			}
+		}
+		int i = 0;
+		for (i = 0; !model1->getLabelInfo(i).compare("") == 0;i++)
+		{
+			stringLabels.insert(pair<int, string>(i, model1->getLabelInfo(i)));
 		}
 	}
 	catch (const std::exception&)
@@ -244,7 +248,7 @@ int main(void)
 			case '2':
 			{
 				system("cls");
-				printf("Enter student name (or s to return)\n");
+				printf("Enter student number (or s to return)\n");
 				cin >> ID;
 				transform(ID.begin(), ID.end(), ID.begin(), ::easytolower);	//all to lower case
 
@@ -283,8 +287,8 @@ int main(void)
 						system("cls");
 						cout << "\nPlease ensure that no other faces are within frame\n" << endl;
 						system("pause");
-						system("cls");
 						trainFace(ID, nameFound);
+						system("cls");
 						cout << "Training Successfully Completed!!" << endl;
 						cout << "Do you wish to continue training (Y/N): ";
 						cin >> mode;
@@ -308,9 +312,9 @@ int main(void)
 			case '3':
 			{
 				int c = waitKey(1);
-				cam >> img;
-				if (!img.empty() && preprocessedFaces.size()>0 && preprocessedFaces.size() == faceLabels.size())
+				if (preprocessedFaces.size()>0 && preprocessedFaces.size() == faceLabels.size())
 				{
+					cam >> img;
 					Mat input = img;
 					//namedWindow("Webcam", 1);
 					recogniseFace(input);
@@ -342,10 +346,10 @@ int main(void)
 					String date;
 					date = toString(now->tm_mday) + "_" + getMonth((now->tm_mon));
 					ofstream outFile("Register/"+date + ".txt");
-					outFile << "ID" << "\t" << "Stu Num" << "\t" << "Present" << "\t" << "Time" << "\t" << "Late" << endl;
+					outFile << "ID" << "\t" << "Stu Num" << "\t\t" << "Present" << "\t" << "Time" << "\t" << "Late" << endl;
 					for (int i = 0; i <=numFaces; i++)
 					{
-						outFile << numFaces << "\t" << model1->getLabelInfo(numFaces) <<"\t"<< BoolToString(Present[numFaces]) << "\t" << (int)MinsPassed[numFaces] << "\t" << BoolToString(Late[numFaces]) << endl;
+						outFile << i << "\t" << model1->getLabelInfo(i) <<"\t"<< BoolToString(Present[i]) << "\t\t" << (int)MinsPassed[i] << "\t\t" << BoolToString(Late[i]) << endl;
 					}
 					outFile.close();
 					//Save trained data
@@ -477,15 +481,21 @@ int main(void)
 				system("pause");
 				system("cls");
 				trainFace(stdNum, nameFound);
-				cout << "Student Successfully Added!!" << endl;
-				system("pause");
+				destroyAllWindows();
 				if (!nameFound)
 				{
 					ofstream outFile("Register/Students.txt", ofstream::app);
 					outFile << numFaces << "\t" << model1->getLabelInfo(numFaces) << "\t" << name << "\t\t" << endl;
 					outFile.close();
 				}	
-				mode = '0';
+				system("cls");
+				cout << "Student Successfully Added!!" << endl;
+				cout << "Do you wish to continue training? (Y/N): ";
+				cin >> mode;
+				if (mode == 'Y' || mode == 'y')
+					mode = '5';
+				else
+					mode = '0';
 				break;
 			}
 			case '9':
@@ -499,7 +509,7 @@ int main(void)
 					Present.clear();
 					Late.clear();
 					MinsPassed.clear();
-					model1 = createEigenFaceRecognizer(0,3000);
+					model1 = createEigenFaceRecognizer();
 					remove("trainedData.yml");
 					remove("retrainModel.yml");
 					numFaces = 0;
@@ -514,6 +524,18 @@ int main(void)
 				cout << "Successfully Wiped Data"<< endl << endl;
 				system("pause");
 				mode = '0';
+				break;
+			}
+			case '#':	//DEBUGGING CASE
+			{
+				system("cls");
+				cin.clear();
+				cin.ignore(256, '\n');
+				destroyAllWindows();
+
+				mode = '0';
+				//cout << numFaces << endl;
+				//system("pause");
 				break;
 			}
 			case 's':	
@@ -693,7 +715,7 @@ void trainFace(string name, bool nameFound)
 
 	if (nameFound == false)	//If name doesn't exist as label - this is a new face/person
 	{
-		if (numFaces != 0)
+		while(!model1->getLabelInfo(numFaces).compare("") == 0)
 			numFaces++;
 
 		labelNum = numFaces;
@@ -708,7 +730,6 @@ void trainFace(string name, bool nameFound)
 				break;
 			}
 		}
-		
 	}
 	
 	double imageDiff = 0;
@@ -755,7 +776,7 @@ void trainFace(string name, bool nameFound)
 		if (faceProcessed)		//if a face was processed, will be stored in new_preprocessedFace
 		{
 			//test - show processed face
-			//imshow("", input);
+			//imshow(" ", input);
 			//if (waitKey(1) == 's') {};
 
 			if (!faceSaved && !nameFound)
@@ -867,6 +888,7 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 	int random;
 	int identity = -1;
 	Mat img = input;
+	//cam >> img;
 	Mat face;
 	double conf;
 	quickDetect(img);
@@ -888,9 +910,9 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 			// Generate a face approximation by back-projecting the eigenvectors & eigenvalues.
 			 Mat reconstructedFace = reconstructFace(model1, preprocessedFace);
 
-			//if (m_debug)//test
-			//	if (reconstructedFace.data)
-			//		imshow("reconstructedFace", reconstructedFace);
+			if (m_debug)//test
+				if (reconstructedFace.data)
+					imshow("reconstructedFace", reconstructedFace);
 
 			// Verify whether the reconstructed face looks like the preprocessed face, otherwise it is probably an unknown person.
 			double similarity = Globals::getSimilarity(preprocessedFace, reconstructedFace);
@@ -904,7 +926,8 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 				//if (identity<0 || conf>2200)break;
 
 				outputStr = model1->getLabelInfo(identity);
-				cout << "Confidence: " << conf <<endl;
+				if (m_debug)
+					cout << "Confidence: " << conf <<endl;
 
 				if (conf < 2200)
 				{
@@ -941,7 +964,8 @@ void recogniseFace(Mat &input)	//TODO: Need to get face FIRST & then call this f
 			}
 			//Display person's name above their face
 			putText(input, outputStr, Point(faceRect[i].x, faceRect[i].y-5), CV_FONT_VECTOR0, 1.0, CV_RGB(0, 255, 0), 2.0);
-			cout << "Identity: " << outputStr << ". Similarity: " << similarity << endl;
+			if(m_debug)
+				cout << "Identity: " << identity << "Stu Num" << outputStr << ". Similarity: " << similarity << endl;
 
 			//int height = preprocessedFaces[0].rows;
 
