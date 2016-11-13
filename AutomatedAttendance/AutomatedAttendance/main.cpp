@@ -91,7 +91,7 @@ void CallBackFunc(int event, int x, int y, int flags, void* userdata)
 
 	if (isPointInRect(pt, button_recog)) {
 		destroyAllWindows();
-		mode = '3';
+		mode = '1';
 	}
 	else if (isPointInRect(pt, button_new)) {
 		destroyAllWindows();
@@ -99,11 +99,11 @@ void CallBackFunc(int event, int x, int y, int flags, void* userdata)
 	}
 	else if (isPointInRect(pt, button_train)) {
 		destroyAllWindows();
-		mode = '5';
+		mode = '4';
 	}
 	else if (isPointInRect(pt, button_data)) {
 		destroyAllWindows();
-		mode = '4';
+		mode = '3';
 	}
 	return;
 		//cout << "Left button of the mouse is clicked - position (" << x << ", " << y << ")" << endl;
@@ -209,12 +209,12 @@ int main(void)
 			{
 				destroyAllWindows();
 				system("cls");
-				printf("MAIN MENU\n");
-				printf("Option 1 - Detect Faces\n");						//Just box faces and display
+				printf("MAIN MENU\n\n");
+				printf("Option 1 - Recognise Faces\n");						//Just box faces and display
 				printf("Option 2 - Add New Student\n");							//Ask user for ID and train
-				printf("Option 3 - Recognise Faces\n");						//Attempt facial recognition
-				printf("Option 4 - Get Register Data\n");							//Register and student info
-				printf("Option 5 - Improve Model\n");							//Add new student
+				printf("Option 3 - Get Register Data\n");							//Register and student info
+				printf("Option 4 - Improve Model\n");							//Add new student
+				printf("Option 5 - Detect Faces\n");						//Attempt facial recognition	
 				printf("Option 9 - Wipe Memory\n");							//Wipe data
 				printf("\nType out an option number and hit ENTER\n(or s to EXIT)\n");
 				printf("\nYour Choice: ");
@@ -223,10 +223,10 @@ int main(void)
 				break;
 			}
 
-			case '1':
+			case '5':
 			{
 				system("cls");
-				while (mode=='1')
+				while (mode=='5')
 				{
 					cam >> img;
 					detectFaces(img);
@@ -246,7 +246,7 @@ int main(void)
 				break;
 			}
 
-			case '5':
+			case '4':
 			{
 				system("cls");
 				printf("Enter student number (or s to return)\n");
@@ -294,7 +294,7 @@ int main(void)
 						cout << "Do you wish to continue training (Y/N): ";
 						cin >> mode;
 						if (mode == 'Y' || mode == 'y')
-							mode = '2';
+							mode = '4';
 						else
 							mode = '0';
 					}
@@ -305,7 +305,7 @@ int main(void)
 				break;
 			}
 
-			case '3':
+			case '1':
 			{
 				int c = waitKey(1);
 				if (preprocessedFaces.size()>0)
@@ -355,7 +355,7 @@ int main(void)
 				}
 				break;
 			}
-			case '4':
+			case '3':
 			{
 				switch (option) //Data Menu
 				{
@@ -484,10 +484,10 @@ int main(void)
 				}	
 				system("cls");
 				cout << "Student Successfully Added!!" << endl;
-				cout << "Do you wish to continue training? (Y/N): ";
+				cout << "Do you wish to add another student? (Y/N): ";
 				cin >> mode;
 				if (mode == 'Y' || mode == 'y')
-					mode = '5';
+					mode = '2';
 				else
 					mode = '0';
 				break;
