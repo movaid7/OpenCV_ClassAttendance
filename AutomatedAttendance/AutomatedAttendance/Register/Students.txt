@@ -1,2 +1,1 @@
-ID	Stu Num		Name
-1	214505927	Mo Vaid		
+0	214505927	Mo Vaid		

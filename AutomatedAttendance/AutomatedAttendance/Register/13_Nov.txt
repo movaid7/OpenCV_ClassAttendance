@@ -1,3 +1,0 @@
-ID	Stu Num		Present	Time	Late
-0	213504260	[ ]	0	[ ]
-1	214505927	[x]	0	[ ]
