@@ -5,4 +5,4 @@ The aim of this project is to implement a camera based solution that periodicall
 of students. The system will then recognise the students present and automatically update a class register database with attendance and 
 information on latecoming.
 
-![Mockup of what the recognition looks like](https://s15.postimg.org/4h6logf7f/untd.png)
+![Mockup of what the recognition looks like](http://i.imgur.com/5swfQgw.png)
