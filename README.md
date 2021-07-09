@@ -1,4 +1,4 @@
-# Automated Class Attendance with OpenCV & Python
+# Automated Class Attendance with Python & OpenCV
 Automated class attendance system built with OpenCV to perform multi-person detection & recognition of students
 
 The aim of this project was to implement a camera based solution that periodically takes a still image from a webcam and detects the faces
