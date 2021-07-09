@@ -5,6 +5,6 @@ The aim of this project was to implement a camera based solution that periodical
 of students. The system then recognises the students present and automatically updates a class register database with attendance and 
 information on latecoming.
 
-However, the implementation that was achieved performed recognition in real time and continuously updated the recognition model by periodically retraining it with up-to-date pictures of each student recognised.
+However, the implementation that was achieved performed multi-face recognition in real time and continuously updated the recognition model by periodically retraining it with up-to-date pictures of each correctly identified student.
 
 ![Mockup of what the recognition looked like](http://i.imgur.com/5swfQgw.png?1)
